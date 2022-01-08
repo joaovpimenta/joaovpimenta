@@ -66,8 +66,8 @@
  
  <p align="left">
 
-- 🕐 Última atualização nesse perfil às: 00:19:27 08-01-2022 GMT -03:00
+- 🕐 Última atualização nesse perfil às: 00:25:52 08-01-2022 GMT -03:00
 - 💻 Feito por: **João Victor Almeida Pimenta**
   
- <\p>
+ </p>
  
