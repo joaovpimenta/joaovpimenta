@@ -38,6 +38,6 @@
 
 
 
-<p align="center"><img src="https://github-readme-stats.vercel.app/api?username=joaovpimenta&show_icons=true&theme=synthwave" alt="AnhellO :: Status do Perfil" />
+<p align="center"><img src="https://github-readme-stats.vercel.app/api?username=joaovpimenta&show_icons=true&theme=synthwave" alt="joaovpimenta :: Status do Perfil" />
 <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=joaovpimenta&langs_count=10&theme=synthwave&layout=compact" alt="joaovpimenta :: Principais Linguagens" />
 </p>
