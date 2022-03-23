@@ -46,7 +46,7 @@
   <p align="left">
   
   [![tryNext](https://github-readme-stats.vercel.app/api/pin/?username=joaovpimenta&repo=tryNext&theme=cobalt)](https://github.com/joaovpimenta/tryNext)
-  [![dicionarioEclipsePTBR](https://github-readme-stats.vercel.app/api/pin/?username=joaovpimenta&repo=dicionarioEclipsePTBR&theme=cobalt)](https://github.com/joaovpimenta/dicionarioEclipsePTBR)
+  [![ProjetoNextAPI](https://github-readme-stats.vercel.app/api/pin/?username=joaovpimenta&repo=ProjetoNextAPI&theme=cobalt)](https://github.com/joaovpimenta/ProjetoNextAPI)
   
   </p> 
  
@@ -66,7 +66,7 @@
  
  <p align="left">
 
-- 🕐 Última atualização nesse perfil às: 00:25:52 08-01-2022 GMT -03:00
+- 🕐 Última atualização nesse perfil às: 14:56:42 23-03-2022 GMT -03:00
 - 💻 Feito por: **João Victor Almeida Pimenta**
   
  </p>
