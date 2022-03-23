@@ -5,7 +5,7 @@
 <p align="left">
 
 - 🔭 Estou trabalhando atualmente com Desenvolvimento em Java;
-- 🌱 No momento estou aprendendo Orientação a Objeto com Java;
+- 🌱 No momento estou aprendendo Spring Boot, Restful API e Spring Security com Java;
 - 👯 Busco fazer colaborações em projetos FOSS;
 - 😄 Pronomes: Ele/Dele;
 - ⚡ Fato curioso sobre mim: Sou Psicólogo.
