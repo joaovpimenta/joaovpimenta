@@ -1,0 +1,60 @@
+name: Development HQ Sync
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run without changing the Project'
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: development-hq-sync
+  cancel-in-progress: false
+
+# Intentionally minimal. Cross-repository and Projects access comes only from
+# the explicitly configured DEVELOPMENT_HQ_TOKEN secret.
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT_OWNER: ${{ vars.DEVELOPMENT_HQ_PROJECT_OWNER || 'joaovpimenta' }}
+      PROJECT_NUMBER: ${{ vars.DEVELOPMENT_HQ_PROJECT_NUMBER || '2' }}
+      LOOKBACK_MINUTES: ${{ vars.DEVELOPMENT_HQ_LOOKBACK_MINUTES || '90' }}
+      REPO_ALLOWLIST: ${{ vars.DEVELOPMENT_HQ_REPO_ALLOWLIST }}
+      REPO_DENYLIST: ${{ vars.DEVELOPMENT_HQ_REPO_DENYLIST }}
+      MIN_PERMISSION: ${{ vars.DEVELOPMENT_HQ_MIN_PERMISSION || 'push' }}
+      INCLUDE_ISSUES: ${{ vars.DEVELOPMENT_HQ_INCLUDE_ISSUES || 'true' }}
+      INCLUDE_PRS: ${{ vars.DEVELOPMENT_HQ_INCLUDE_PRS || 'true' }}
+      LOG_LEVEL: ${{ vars.DEVELOPMENT_HQ_LOG_LEVEL || 'info' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      GH_TOKEN: ${{ secrets.DEVELOPMENT_HQ_TOKEN }}
+
+    steps:
+      - name: Checkout automation only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate secret and mask it
+        shell: bash
+        run: |
+          set +x
+          if [ -z "$GH_TOKEN" ]; then
+            echo 'Missing required secret DEVELOPMENT_HQ_TOKEN.' >&2
+            exit 1
+          fi
+          echo "::add-mask::$GH_TOKEN"
+
+      - name: Sync changed work items
+        shell: bash
+        run: |
+          set +x
+          node scripts/development-hq-sync.mjs
