@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 # Intentionally minimal. Cross-repository and Projects access comes only from
-# the explicitly configured DEVELOPMENT_HQ_TOKEN secret.
+# the explicitly configured PROJECT_SCANNER_TOKEN secret.
 permissions:
   contents: read
 
@@ -35,7 +35,7 @@ jobs:
       INCLUDE_PRS: ${{ vars.DEVELOPMENT_HQ_INCLUDE_PRS || 'true' }}
       LOG_LEVEL: ${{ vars.DEVELOPMENT_HQ_LOG_LEVEL || 'info' }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
-      GH_TOKEN: ${{ secrets.DEVELOPMENT_HQ_TOKEN }}
+      GH_TOKEN: ${{ secrets.PROJECT_SCANNER_TOKEN }}
 
     steps:
       - name: Checkout automation only
@@ -48,7 +48,7 @@ jobs:
         run: |
           set +x
           if [ -z "$GH_TOKEN" ]; then
-            echo 'Missing required secret DEVELOPMENT_HQ_TOKEN.' >&2
+            echo 'Missing required secret PROJECT_SCANNER_TOKEN.' >&2
             exit 1
           fi
           echo "::add-mask::$GH_TOKEN"
