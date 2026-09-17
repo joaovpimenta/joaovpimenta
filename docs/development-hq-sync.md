@@ -5,7 +5,7 @@ Central, incremental synchronization of recently changed GitHub issues and pull 
 ## Security model
 
 - No credential is committed to the repository.
-- The workflow uses only `secrets.DEVELOPMENT_HQ_TOKEN` for cross-repository/Projects access.
+- The workflow uses only `secrets.PROJECT_SCANNER_TOKEN` for cross-repository/Projects access.
 - The built-in `GITHUB_TOKEN` has only `contents: read`.
 - Checkout credentials are not persisted.
 - Shell tracing is disabled before handling the token.
@@ -17,7 +17,7 @@ Central, incremental synchronization of recently changed GitHub issues and pull 
 
 ## Required secret
 
-Create an Actions secret named `DEVELOPMENT_HQ_TOKEN`.
+Create an Actions secret named `PROJECT_SCANNER_TOKEN`.
 
 The credential must be able to:
 
