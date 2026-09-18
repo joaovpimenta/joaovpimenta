@@ -1,3 +1,5 @@
+class SafeError extends Error {}
+
 const token = required('GH_TOKEN');
 const owner = env('PROJECT_OWNER', 'joaovpimenta');
 const projectNumber = intEnv('PROJECT_NUMBER', 2, 1, 1000000);
@@ -122,7 +124,6 @@ function safeError(prefix, error) {
   console.error(`${prefix}: ${message}`);
   if (debug) console.error('Debug logging is sanitized; raw API payloads are intentionally unavailable.');
 }
-class SafeError extends Error {}
 function env(name, fallback = '') { return (process.env[name] ?? fallback).trim(); }
 function required(name) { const v = env(name); if (!v) throw new Error(`Missing ${name}`); return v; }
 function boolEnv(name, fallback) { const v = env(name); return v ? ['1','true','yes','on'].includes(v.toLowerCase()) : fallback; }
