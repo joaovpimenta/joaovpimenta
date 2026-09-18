@@ -1,6 +1,11 @@
 name: Development HQ Sync
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/development-hq-sync.yml'
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
@@ -34,7 +39,7 @@ jobs:
       INCLUDE_ISSUES: ${{ vars.DEVELOPMENT_HQ_INCLUDE_ISSUES || 'true' }}
       INCLUDE_PRS: ${{ vars.DEVELOPMENT_HQ_INCLUDE_PRS || 'true' }}
       LOG_LEVEL: ${{ vars.DEVELOPMENT_HQ_LOG_LEVEL || 'info' }}
-      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || github.event_name == 'push' || (github.event_name == 'schedule' && vars.DEVELOPMENT_HQ_APPLY_ENABLED != 'true') }}
       GH_TOKEN: ${{ secrets.PROJECT_SCANNER_TOKEN }}
 
     steps:
