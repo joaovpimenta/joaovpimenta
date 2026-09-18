@@ -1,3 +1,4 @@
+<!-- managed-by: development-hq-governance -->
 ## Summary
 
 Describe what changed and why.
