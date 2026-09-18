@@ -21,6 +21,9 @@ const counters = {
   callersCreated: 0,
   callersUpdated: 0,
   callerConflicts: 0,
+  repoTemplatesCreated: 0,
+  repoTemplatesUpdated: 0,
+  repoTemplateConflicts: 0,
   ownerDefaultsSynced: 0,
   ownerDefaultsMissing: 0,
   ownerDefaultsInvalid: 0,
@@ -41,7 +44,10 @@ try {
   for (const repo of governed) {
     try {
       await ensureLabels(repo);
-      if (repo.name !== '.github') await ensureCaller(repo);
+      if (repo.name !== '.github') {
+        await ensureCaller(repo);
+        await ensureRepoTemplates(repo);
+      }
       await normalizeRecentIssues(repo);
     } catch (error) {
       counters.errors++;
@@ -71,6 +77,9 @@ try {
   console.log(`Managed callers created: ${counters.callersCreated}`);
   console.log(`Managed callers updated: ${counters.callersUpdated}`);
   console.log(`Caller conflicts: ${counters.callerConflicts}`);
+  console.log(`Repo templates created: ${counters.repoTemplatesCreated}`);
+  console.log(`Repo templates updated: ${counters.repoTemplatesUpdated}`);
+  console.log(`Repo template conflicts: ${counters.repoTemplateConflicts}`);
   console.log(`Owner defaults synced: ${counters.ownerDefaultsSynced}`);
   console.log(`Owner defaults missing: ${counters.ownerDefaultsMissing}`);
   console.log(`Owner defaults invalid: ${counters.ownerDefaultsInvalid}`);
@@ -181,6 +190,40 @@ async function ensureCaller(repo) {
   counters.callersUpdated++;
   if (!dryRun) {
     await putContent(repo.full_name, path, desired, 'chore: update governance workflow', existing.sha);
+  }
+}
+
+async function ensureRepoTemplates(repo) {
+  const files = [
+    ['.github/ISSUE_TEMPLATE/work-item.yml', 'governance/defaults/ISSUE_TEMPLATE/work-item.yml', '# managed-by: development-hq-governance'],
+    ['.github/ISSUE_TEMPLATE/config.yml', 'governance/defaults/ISSUE_TEMPLATE/config.yml', '# managed-by: development-hq-governance'],
+    ['.github/PULL_REQUEST_TEMPLATE.md', 'governance/defaults/PULL_REQUEST_TEMPLATE.md', '<!-- managed-by: development-hq-governance -->']
+  ];
+
+  for (const [target, source, marker] of files) {
+    const desired = fs.readFileSync(source, 'utf8');
+    const existing = await getContent(repo.full_name, target);
+
+    if (!existing) {
+      counters.repoTemplatesCreated++;
+      if (!dryRun) {
+        await putContent(repo.full_name, target, desired, 'chore: install governance template');
+      }
+      continue;
+    }
+
+    const current = decodeContent(existing);
+    if (current === desired) continue;
+
+    if (!current.startsWith(marker)) {
+      counters.repoTemplateConflicts++;
+      continue;
+    }
+
+    counters.repoTemplatesUpdated++;
+    if (!dryRun) {
+      await putContent(repo.full_name, target, desired, 'chore: update governance template', existing.sha);
+    }
   }
 }
 
