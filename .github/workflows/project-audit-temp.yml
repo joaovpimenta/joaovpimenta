@@ -1,0 +1,92 @@
+name: Project Audit Temporary
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/project-audit-temp.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_SCANNER_TOKEN }}
+      PROJECT_OWNER: joaovpimenta
+      PROJECT_NUMBER: '2'
+    steps:
+      - name: Validate secret
+        shell: bash
+        run: |
+          set +x
+          test -n "$GH_TOKEN" || { echo "Missing audit credential"; exit 1; }
+          echo "::add-mask::$GH_TOKEN"
+      - name: Collect encrypted project audit
+        shell: bash
+        run: |
+          set +x
+          node <<'NODE'
+          const crypto = require('crypto');
+          const token=process.env.GH_TOKEN, owner=process.env.PROJECT_OWNER, number=Number(process.env.PROJECT_NUMBER);
+          const publicKey="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAztZsSrsPiugI+V63MRmt\n21bz1c+l18qFZrt/efCmWS+Ruqr1u3s7I+a0TuMKcNKf8yiEjgWJZEamHC7cr0Pu\nGeNsW0hCNI9/vngK10kWQS83Uy9cDU5pYQ5oVkQDvMn0reFOv/BXJUMyVfJffDP1\nq387osdRFRH/Htq5janyDfP5de3bjJN+BG5pcptoAHKZa97/Ny+NDGFQfU3EvCAS\niLR0EXN0lAKKIJLY/jRe7zh2f40Z1uzmNP7H381jdg0yX/STRbc5DiKaXrJwExwC\nXkbDBKrzcVQlng0YU894+bZKjAZvydeC7hMSDGNIdxSR0iKJhNxdZHezTEDEk0mH\n+QIDAQAB\n-----END PUBLIC KEY-----";
+          async function gql(query,variables){
+            const r=await fetch('https://api.github.com/graphql',{method:'POST',headers:{authorization:`Bearer ${token}`,accept:'application/vnd.github+json','content-type':'application/json','user-agent':'development-hq-audit'},body:JSON.stringify({query,variables})});
+            if(!r.ok) throw new Error(`GraphQL HTTP ${r.status}`);
+            const j=await r.json(); if(j.errors?.length) throw new Error('GraphQL operation rejected'); return j.data;
+          }
+          const meta=await gql(`
+            query($login:String!,$number:Int!){
+              user(login:$login){ projectV2(number:$number){
+                id title
+                fields(first:100){nodes{
+                  __typename
+                  ... on ProjectV2FieldCommon {id name}
+                  ... on ProjectV2SingleSelectField {id name options{id name}}
+                  ... on ProjectV2IterationField {id name configuration{iterations{id title startDate duration}}}
+                }}
+                views(first:50){nodes{
+                  id number name layout filter
+                  fields(first:50){nodes{... on ProjectV2FieldCommon{id name}}}
+                  groupByFields(first:10){nodes{... on ProjectV2FieldCommon{id name}}}
+                  verticalGroupByFields(first:10){nodes{... on ProjectV2FieldCommon{id name}}}
+                }}
+              }}
+            }`,{login:owner,number});
+          const project=meta.user?.projectV2; if(!project) throw new Error('Project unavailable');
+          const items=[]; let after=null;
+          for(let page=0;page<50;page++){
+            const data=await gql(`
+              query($id:ID!,$after:String){node(id:$id){... on ProjectV2{
+                items(first:100,after:$after){
+                  nodes{
+                    id type
+                    content{
+                      __typename
+                      ... on Issue{id number state repository{nameWithOwner owner{login}} labels(first:20){nodes{name}} assignees(first:10){nodes{login}}}
+                      ... on PullRequest{id number state isDraft repository{nameWithOwner owner{login}} labels(first:20){nodes{name}} assignees(first:10){nodes{login}}}
+                      ... on DraftIssue{id}
+                    }
+                    fieldValues(first:50){nodes{
+                      __typename
+                      ... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2FieldCommon{name}}}
+                      ... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2FieldCommon{name}}}
+                      ... on ProjectV2ItemFieldNumberValue{number field{... on ProjectV2FieldCommon{name}}}
+                      ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2FieldCommon{name}}}
+                      ... on ProjectV2ItemFieldIterationValue{title field{... on ProjectV2FieldCommon{name}}}
+                    }}
+                  }
+                  pageInfo{hasNextPage endCursor}
+                }
+              }}}`,{id:project.id,after});
+            const conn=data.node?.items; if(!conn) throw new Error('Project items unavailable');
+            items.push(...conn.nodes); if(!conn.pageInfo.hasNextPage) break; after=conn.pageInfo.endCursor;
+          }
+          const audit={capturedAt:new Date().toISOString(),project:{title:project.title,fields:project.fields.nodes,views:project.views.nodes},items};
+          const plaintext=Buffer.from(JSON.stringify(audit));
+          const aesKey=crypto.randomBytes(32), iv=crypto.randomBytes(12);
+          const cipher=crypto.createCipheriv('aes-256-gcm',aesKey,iv);
+          const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]), tag=cipher.getAuthTag();
+          const encryptedKey=crypto.publicEncrypt({key:publicKey,padding:crypto.constants.RSA_PKCS1_OAEP_PADDING,oaepHash:'sha256'},aesKey);
+          console.log('AUDIT_ENCRYPTED_V1');
+          console.log(JSON.stringify({key:encryptedKey.toString('base64'),iv:iv.toString('base64'),tag:tag.toString('base64'),data:ciphertext.toString('base64')}));
+          console.log('AUDIT_COMPLETE');
+          NODE
