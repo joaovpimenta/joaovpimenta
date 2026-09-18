@@ -25,7 +25,7 @@ Before writes, the script loads the current Project content IDs. Existing items 
 - Errors are sanitized. `LOG_LEVEL=debug` does not enable raw payload logging.
 - No artifacts or caches contain credentials or API responses.
 - Manual runs default to dry-run.
-- Scheduled runs remain dry-run unless `DEVELOPMENT_HQ_APPLY_ENABLED=true`.
+- Scheduled runs apply the incremental sync automatically; push-triggered validation runs remain dry-run.
 
 ## Required secret
 
@@ -52,7 +52,6 @@ For organization repositories, the credential may also need organization approva
 | `DEVELOPMENT_HQ_INCLUDE_ISSUES` | `true` | Include issues |
 | `DEVELOPMENT_HQ_INCLUDE_PRS` | `true` | Include pull requests |
 | `DEVELOPMENT_HQ_LOG_LEVEL` | `info` | `info` or sanitized `debug` |
-| `DEVELOPMENT_HQ_APPLY_ENABLED` | `false` | Allow scheduled runs to write |
 
 ## Manual runs
 
@@ -66,7 +65,7 @@ For a one-time open-work backfill:
 - first run `dry_run=true`, `backfill_open=true`;
 - then run `dry_run=false`, `backfill_open=true` after validating aggregate counts.
 
-The scheduled run executes hourly at minute 17 and uses the incremental window.
+The scheduled run executes hourly at minute 17, uses the incremental window, and applies missing items automatically.
 
 ## Current scope
 
