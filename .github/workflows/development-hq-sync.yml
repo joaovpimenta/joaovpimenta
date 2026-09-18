@@ -45,8 +45,8 @@ jobs:
       INCLUDE_ISSUES: ${{ vars.DEVELOPMENT_HQ_INCLUDE_ISSUES || 'true' }}
       INCLUDE_PRS: ${{ vars.DEVELOPMENT_HQ_INCLUDE_PRS || 'true' }}
       LOG_LEVEL: ${{ vars.DEVELOPMENT_HQ_LOG_LEVEL || 'info' }}
-      BACKFILL_OPEN: ${{ (github.event_name == 'workflow_dispatch' && inputs.backfill_open) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[development-hq-backfill]')) }}
-      DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) || (github.event_name == 'push' && !contains(github.event.head_commit.message, '[development-hq-backfill]')) || (github.event_name == 'schedule' && vars.DEVELOPMENT_HQ_APPLY_ENABLED != 'true') }}
+      BACKFILL_OPEN: ${{ github.event_name == 'workflow_dispatch' && inputs.backfill_open }}
+      DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) || github.event_name == 'push' }}
       GH_TOKEN: ${{ secrets.PROJECT_SCANNER_TOKEN }}
 
     steps:
