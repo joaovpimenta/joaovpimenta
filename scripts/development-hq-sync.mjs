@@ -19,8 +19,8 @@ const counters = { discovered: 0, eligible: 0, changed: 0, added: 0, skipped: 0,
 const since = new Date(Date.now() - lookbackMinutes * 60_000).toISOString();
 
 try {
-  const project = await graphql(`query($login:String!,$number:Int!){ user(login:$login){ projectV2(number:$number){ id } } organization(login:$login){ projectV2(number:$number){ id } } }`, { login: owner, number: projectNumber });
-  const projectId = project.user?.projectV2?.id ?? project.organization?.projectV2?.id;
+  const project = await graphql(`query($login:String!,$number:Int!){ user(login:$login){ projectV2(number:$number){ id } } }`, { login: owner, number: projectNumber });
+  const projectId = project.user?.projectV2?.id;
   if (!projectId) throw new SafeError('Configured Project was not found or token cannot access it.');
 
   const repos = await listRepos();
