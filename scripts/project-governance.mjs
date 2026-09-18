@@ -17,6 +17,8 @@ const counters = {
   itemsScanned: 0,
   fieldValuesWouldUpdate: 0,
   fieldValuesUpdated: 0,
+  viewsWouldCreate: 0,
+  viewsCreated: 0,
   errors: 0
 };
 
@@ -55,6 +57,8 @@ try {
   if (!dryRun) {
     await pruneKnownLegacyStatusOptions(project);
   }
+
+  await ensureViews(project);
 } catch (error) {
   counters.errors++;
   safeError('Project governance failed', error);
@@ -67,6 +71,8 @@ try {
   console.log(`Items scanned: ${counters.itemsScanned}`);
   console.log(`Field values would update: ${counters.fieldValuesWouldUpdate}`);
   console.log(`Field values updated: ${counters.fieldValuesUpdated}`);
+  console.log(`Views would create: ${counters.viewsWouldCreate}`);
+  console.log(`Views created: ${counters.viewsCreated}`);
   console.log(`Errors: ${counters.errors}`);
   console.log(`Mode: ${dryRun ? 'DRY RUN' : 'APPLY'}`);
 }
@@ -408,6 +414,111 @@ async function pruneKnownLegacyStatusOptions(project) {
     { input: { fieldId: status.id, singleSelectOptions: cleaned } }
   );
   counters.fieldsUpdated++;
+}
+
+
+async function ensureViews(project) {
+  const fields = new Map((project.fields?.nodes || []).map(field => [field.name, field]));
+  const title = fields.get('Title')?.databaseId;
+  const status = fields.get('Status')?.databaseId;
+  const priority = fields.get('Priority')?.databaseId;
+  const organization = fields.get('Organization')?.databaseId;
+  const repository = fields.get('Repository')?.databaseId;
+  const type = fields.get('Type')?.databaseId;
+  const area = fields.get('Area')?.databaseId;
+  const product = fields.get('Product')?.databaseId;
+  const updated = fields.get('Updated')?.databaseId;
+
+  const user = await rest(`/users/${encodeURIComponent(owner)}`);
+  const viewsResponse = await rest(`/users/${user.id}/projectsV2/${projectNumber}/views?per_page=100`);
+  const existing = Array.isArray(viewsResponse) ? viewsResponse : (viewsResponse.value || viewsResponse.views || []);
+  const names = new Set(existing.map(view => view.name));
+
+  const commonVisible = [title, status, priority, type, area, organization, product, repository].filter(Number.isInteger);
+  const tableVisible = [...commonVisible, updated].filter(Number.isInteger);
+
+  const specs = [
+    {
+      name: 'Command Center',
+      layout: 'board',
+      filter: 'is:open',
+      visible_fields: commonVisible,
+      sort_by: priority ? [[priority, 'asc']] : undefined,
+      group_by: organization ? [organization] : undefined,
+      vertical_group_by: status ? [status] : undefined
+    },
+    {
+      name: 'By Repository',
+      layout: 'table',
+      filter: 'is:open',
+      visible_fields: tableVisible,
+      sort_by: priority ? [[priority, 'asc']] : undefined,
+      group_by: repository ? [repository] : undefined
+    },
+    {
+      name: 'Now',
+      layout: 'board',
+      filter: 'status:Ready,"In Progress",Review,Blocked',
+      visible_fields: commonVisible,
+      sort_by: priority ? [[priority, 'asc']] : undefined,
+      group_by: organization ? [organization] : undefined,
+      vertical_group_by: status ? [status] : undefined
+    },
+    {
+      name: 'Triage',
+      layout: 'table',
+      filter: 'label:"policy:needs-triage"',
+      visible_fields: tableVisible,
+      sort_by: priority ? [[priority, 'asc']] : undefined,
+      group_by: repository ? [repository] : undefined
+    },
+    {
+      name: 'Pull Requests',
+      layout: 'table',
+      filter: 'is:pr is:open',
+      visible_fields: tableVisible,
+      sort_by: priority ? [[priority, 'asc']] : undefined,
+      group_by: repository ? [repository] : undefined
+    },
+    {
+      name: 'Recently Done',
+      layout: 'table',
+      filter: 'status:Done',
+      visible_fields: tableVisible,
+      sort_by: updated ? [[updated, 'desc']] : undefined,
+      group_by: repository ? [repository] : undefined
+    }
+  ];
+
+  for (const spec of specs) {
+    if (names.has(spec.name)) continue;
+    counters.viewsWouldCreate++;
+    if (dryRun) continue;
+
+    const body = Object.fromEntries(
+      Object.entries(spec).filter(([, value]) => value !== undefined && (!Array.isArray(value) || value.length))
+    );
+    await rest(`/users/${user.id}/projectsV2/${projectNumber}/views`, { method: 'POST', body });
+    counters.viewsCreated++;
+  }
+}
+
+async function rest(path, options = {}) {
+  const response = await fetch(`https://api.github.com${path}`, {
+    method: options.method || 'GET',
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: 'application/vnd.github+json',
+      'content-type': 'application/json',
+      'x-github-api-version': '2026-03-10',
+      'user-agent': 'development-hq-project-governance'
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+
+  if (!response.ok) throw new SafeError(`GitHub REST request failed (${response.status}).`);
+  if (response.status === 204) return null;
+  return response.json();
 }
 
 function option(name, color, description = '') {
