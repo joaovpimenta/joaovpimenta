@@ -25,7 +25,7 @@ jobs:
         run: |
           set +x
           node <<'NODE'
-          const crypto = require('crypto');
+          import * as crypto from 'node:crypto';
           const token=process.env.GH_TOKEN, owner=process.env.PROJECT_OWNER, number=Number(process.env.PROJECT_NUMBER);
           const publicKey="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAztZsSrsPiugI+V63MRmt\n21bz1c+l18qFZrt/efCmWS+Ruqr1u3s7I+a0TuMKcNKf8yiEjgWJZEamHC7cr0Pu\nGeNsW0hCNI9/vngK10kWQS83Uy9cDU5pYQ5oVkQDvMn0reFOv/BXJUMyVfJffDP1\nq387osdRFRH/Htq5janyDfP5de3bjJN+BG5pcptoAHKZa97/Ny+NDGFQfU3EvCAS\niLR0EXN0lAKKIJLY/jRe7zh2f40Z1uzmNP7H381jdg0yX/STRbc5DiKaXrJwExwC\nXkbDBKrzcVQlng0YU894+bZKjAZvydeC7hMSDGNIdxSR0iKJhNxdZHezTEDEk0mH\n+QIDAQAB\n-----END PUBLIC KEY-----";
           async function gql(query,variables){
