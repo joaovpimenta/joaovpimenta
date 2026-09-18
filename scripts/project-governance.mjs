@@ -98,6 +98,9 @@ async function getProject() {
               }
             }
           }
+          views(first:100){
+            nodes { id name number layout filter }
+          }
         }
       }
     }`,
@@ -430,9 +433,7 @@ async function ensureViews(project) {
   const updated = fields.get('Updated')?.databaseId;
 
   const user = await rest(`/users/${encodeURIComponent(owner)}`);
-  const viewsResponse = await rest(`/users/${user.id}/projectsV2/${projectNumber}/views?per_page=100`);
-  const existing = Array.isArray(viewsResponse) ? viewsResponse : (viewsResponse.value || viewsResponse.views || []);
-  const names = new Set(existing.map(view => view.name));
+  const names = new Set((project.views?.nodes || []).map(view => view.name));
 
   const commonVisible = [title, status, priority, type, area, organization, product, repository].filter(Number.isInteger);
   const tableVisible = [...commonVisible, updated].filter(Number.isInteger);
