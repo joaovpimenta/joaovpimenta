@@ -1,72 +1,77 @@
 # Development HQ Sync
 
-Central synchronization of GitHub issues and pull requests into personal Project #2.
+Central synchronization and governance of GitHub issues and pull requests into personal Project #2.
 
-## Behavior
+## Execution model
 
-The sync has two modes:
+The workflow now has three coordinated stages:
 
-1. **Open backfill**: scans every open issue and pull request in every eligible repository and adds anything missing from the Project.
-2. **Incremental sync**: scans only repository-scoped issues and pull requests updated inside the overlap window (90 minutes by default).
+1. **Governance reconciliation** — labels, event callers, owner-level default templates, recent Issue normalization, and native dependency reconciliation.
+2. **Project ingestion** — repository-scoped addition of Issues/PRs to the central Project.
+3. **Project metadata reconciliation** — canonical fields, metadata mirroring, status migration, and canonical views.
 
-The repository-scoped incremental scan avoids the previous global GitHub Search behavior that could inspect large numbers of unrelated public items.
+See `docs/governance.md` for the full policy and ownership model.
 
-Before writes, the script loads the current Project content IDs. Existing items are skipped, so repeated backfills and overlapping incremental runs are idempotent.
+## Modes
+
+- **Incremental**: scans items changed inside the overlap window.
+- **Open backfill**: scans all open Issues and PRs.
+- **Full historical retrofit**: scans all Issues and PRs, including closed items.
+
+Manual runs default to dry-run.
+
+## Schedule
+
+The scheduled workflow runs every two hours during the working day at 09:17, 11:17, 13:17, 15:17, 17:17, and 19:17 America/Sao_Paulo.
+
+The default incremental overlap is 180 minutes.
 
 ## Security model
 
 - No credential is committed to the repository.
 - The workflow uses only `secrets.PROJECT_SCANNER_TOKEN` for cross-repository/Projects access.
-- The built-in `GITHUB_TOKEN` has only `contents: read`.
+- The built-in `GITHUB_TOKEN` has only `contents: read` in the controller.
 - Checkout credentials are not persisted.
 - Shell tracing is disabled before handling the token.
-- The token is explicitly masked with `::add-mask::`.
-- The script never logs issue/PR titles, bodies, comments, raw API payloads, authorization headers, or private repository names.
-- Errors are sanitized. `LOG_LEVEL=debug` does not enable raw payload logging.
-- No artifacts or caches contain credentials or API responses.
-- Manual runs default to dry-run.
-- Scheduled runs apply the incremental sync automatically; push-triggered validation runs remain dry-run.
+- The token is explicitly masked.
+- Scripts never log issue/PR titles, bodies, raw API payloads, authorization headers, or private repository names.
+- Push-triggered validation remains dry-run.
+- Scheduled runs apply incremental reconciliation automatically.
 
 ## Required secret
 
-Create an Actions secret named `PROJECT_SCANNER_TOKEN`.
+`PROJECT_SCANNER_TOKEN` must be able to:
 
-The credential must be able to:
+1. read governed repositories;
+2. read/write Issues and labels in governed repositories;
+3. create/update the managed governance workflow file;
+4. read/write the target GitHub Project.
 
-1. read the repositories that should be discovered/synchronized;
-2. read issues and pull requests in those repositories;
-3. read and write the target GitHub Project.
+The existing classic PAT also needs the `workflow` scope to install managed workflow files. Organization repositories may require SSO authorization.
 
-For organization repositories, the credential may also need organization approval/SSO authorization.
-
-## Optional repository variables
+## Optional variables
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `DEVELOPMENT_HQ_PROJECT_OWNER` | `joaovpimenta` | Project owner login |
+| `DEVELOPMENT_HQ_PROJECT_OWNER` | `joaovpimenta` | Personal Project owner |
 | `DEVELOPMENT_HQ_PROJECT_NUMBER` | `2` | Project number |
-| `DEVELOPMENT_HQ_LOOKBACK_MINUTES` | `90` | Incremental overlap window |
-| `DEVELOPMENT_HQ_MIN_PERMISSION` | `push` | Minimum repo permission |
-| `DEVELOPMENT_HQ_REPO_ALLOWLIST` | empty | Optional comma-separated `owner/repo` allowlist |
-| `DEVELOPMENT_HQ_REPO_DENYLIST` | empty | Optional comma-separated `owner/repo` denylist |
-| `DEVELOPMENT_HQ_INCLUDE_ISSUES` | `true` | Include issues |
+| `DEVELOPMENT_HQ_LOOKBACK_MINUTES` | `180` | Incremental overlap window |
+| `DEVELOPMENT_HQ_MIN_PERMISSION` | `push` | Minimum permission for Project ingestion |
+| `DEVELOPMENT_HQ_REPO_ALLOWLIST` | empty | Optional allowlist |
+| `DEVELOPMENT_HQ_REPO_DENYLIST` | empty | Optional denylist |
+| `DEVELOPMENT_HQ_INCLUDE_ISSUES` | `true` | Include Issues |
 | `DEVELOPMENT_HQ_INCLUDE_PRS` | `true` | Include pull requests |
-| `DEVELOPMENT_HQ_LOG_LEVEL` | `info` | `info` or sanitized `debug` |
+| `DEVELOPMENT_HQ_LOG_LEVEL` | `info` | Sanitized logging level |
 
-## Manual runs
+No repository registration is required when allowlist/denylist are empty.
 
-For a normal validation run:
+## Bootstrap required outside this repository
 
-- `dry_run=true`
-- `backfill_open=false`
+Create one public `.github` repository for every owner whose repositories should inherit the default Issue Form/PR template.
 
-For a one-time open-work backfill:
+For the current structure this means at least:
 
-- first run `dry_run=true`, `backfill_open=true`;
-- then run `dry_run=false`, `backfill_open=true` after validating aggregate counts.
+- the personal account `.github` repository;
+- the Glucontinuum organization `.github` repository.
 
-The scheduled run executes hourly at minute 17, uses the incremental window, and applies missing items automatically.
-
-## Current scope
-
-The sync ingests issues and pull requests into the Project. Project Status reconciliation is intentionally separate so ingestion cannot overwrite manual workflow state.
+After those repositories exist, the controller populates and maintains their template files automatically.
