@@ -57,6 +57,7 @@ jobs:
       BACKFILL_OPEN: ${{ github.event_name == 'workflow_dispatch' && inputs.backfill_open }}
       RETROFIT_HISTORY: ${{ github.event_name == 'workflow_dispatch' && inputs.retrofit_history }}
       DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) || github.event_name == 'push' }}
+      GOVERNANCE_DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) || github.event_name == 'push' || (github.event_name == 'schedule' && vars.DEVELOPMENT_HQ_GOVERNANCE_APPLY_ENABLED != 'true') }}
       GH_TOKEN: ${{ secrets.PROJECT_SCANNER_TOKEN }}
 
     steps:
@@ -79,7 +80,7 @@ jobs:
         shell: bash
         run: |
           set +x
-          node scripts/governance-reconcile.mjs
+          DRY_RUN="$GOVERNANCE_DRY_RUN" node scripts/governance-reconcile.mjs
 
       - name: Sync work items
         shell: bash
@@ -91,4 +92,4 @@ jobs:
         shell: bash
         run: |
           set +x
-          node scripts/project-governance.mjs
+          DRY_RUN="$GOVERNANCE_DRY_RUN" node scripts/project-governance.mjs
