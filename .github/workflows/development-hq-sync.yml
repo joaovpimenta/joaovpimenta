@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - '.github/workflows/development-hq-sync.yml'
+      - 'scripts/development-hq-sync.mjs'
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
@@ -14,6 +15,11 @@ on:
         description: 'Run without changing the Project'
         required: false
         default: true
+        type: boolean
+      backfill_open:
+        description: 'Scan all open issues and PRs instead of only the incremental window'
+        required: false
+        default: false
         type: boolean
 
 concurrency:
@@ -28,7 +34,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       PROJECT_OWNER: ${{ vars.DEVELOPMENT_HQ_PROJECT_OWNER || 'joaovpimenta' }}
       PROJECT_NUMBER: ${{ vars.DEVELOPMENT_HQ_PROJECT_NUMBER || '2' }}
@@ -39,7 +45,8 @@ jobs:
       INCLUDE_ISSUES: ${{ vars.DEVELOPMENT_HQ_INCLUDE_ISSUES || 'true' }}
       INCLUDE_PRS: ${{ vars.DEVELOPMENT_HQ_INCLUDE_PRS || 'true' }}
       LOG_LEVEL: ${{ vars.DEVELOPMENT_HQ_LOG_LEVEL || 'info' }}
-      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || github.event_name == 'push' || (github.event_name == 'schedule' && vars.DEVELOPMENT_HQ_APPLY_ENABLED != 'true') }}
+      BACKFILL_OPEN: ${{ (github.event_name == 'workflow_dispatch' && inputs.backfill_open) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[development-hq-backfill]')) }}
+      DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) || (github.event_name == 'push' && !contains(github.event.head_commit.message, '[development-hq-backfill]')) || (github.event_name == 'schedule' && vars.DEVELOPMENT_HQ_APPLY_ENABLED != 'true') }}
       GH_TOKEN: ${{ secrets.PROJECT_SCANNER_TOKEN }}
 
     steps:
@@ -58,7 +65,7 @@ jobs:
           fi
           echo "::add-mask::$GH_TOKEN"
 
-      - name: Sync changed work items
+      - name: Sync work items
         shell: bash
         run: |
           set +x
