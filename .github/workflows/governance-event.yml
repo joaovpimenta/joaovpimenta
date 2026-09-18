@@ -1,0 +1,30 @@
+name: Governance Event
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  normalize:
+    if: ${{ github.event_name == 'issues' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch governance policy and worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/joaovpimenta/joaovpimenta/main/scripts/governance-event.mjs -o /tmp/governance-event.mjs
+          curl -fsSL https://raw.githubusercontent.com/joaovpimenta/joaovpimenta/main/governance/taxonomy.json -o /tmp/taxonomy.json
+
+      - name: Reconcile issue metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOVERNANCE_POLICY_PATH: /tmp/taxonomy.json
+        run: |
+          set +x
+          node /tmp/governance-event.mjs

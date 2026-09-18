@@ -6,13 +6,19 @@ on:
       - main
     paths:
       - '.github/workflows/development-hq-sync.yml'
+      - '.github/workflows/governance-event.yml'
       - 'scripts/development-hq-sync.mjs'
+      - 'scripts/governance-reconcile.mjs'
+      - 'scripts/governance-event.mjs'
+      - 'scripts/project-governance.mjs'
+      - 'governance/**'
   schedule:
-    - cron: '17 * * * *'
+    # 09:17, 11:17, 13:17, 15:17, 17:17 and 19:17 America/Sao_Paulo (UTC-3).
+    - cron: '17 12,14,16,18,20,22 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Run without changing the Project'
+        description: 'Run without changing repositories or the Project'
         required: false
         default: true
         type: boolean
@@ -21,24 +27,27 @@ on:
         required: false
         default: false
         type: boolean
+      retrofit_history:
+        description: 'Scan and normalize all historical issues/PRs, including closed items'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: development-hq-sync
   cancel-in-progress: false
 
-# Intentionally minimal. Cross-repository and Projects access comes only from
-# the explicitly configured PROJECT_SCANNER_TOKEN secret.
 permissions:
   contents: read
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     env:
       PROJECT_OWNER: ${{ vars.DEVELOPMENT_HQ_PROJECT_OWNER || 'joaovpimenta' }}
       PROJECT_NUMBER: ${{ vars.DEVELOPMENT_HQ_PROJECT_NUMBER || '2' }}
-      LOOKBACK_MINUTES: ${{ vars.DEVELOPMENT_HQ_LOOKBACK_MINUTES || '90' }}
+      LOOKBACK_MINUTES: ${{ vars.DEVELOPMENT_HQ_LOOKBACK_MINUTES || '180' }}
       REPO_ALLOWLIST: ${{ vars.DEVELOPMENT_HQ_REPO_ALLOWLIST }}
       REPO_DENYLIST: ${{ vars.DEVELOPMENT_HQ_REPO_DENYLIST }}
       MIN_PERMISSION: ${{ vars.DEVELOPMENT_HQ_MIN_PERMISSION || 'push' }}
@@ -46,11 +55,12 @@ jobs:
       INCLUDE_PRS: ${{ vars.DEVELOPMENT_HQ_INCLUDE_PRS || 'true' }}
       LOG_LEVEL: ${{ vars.DEVELOPMENT_HQ_LOG_LEVEL || 'info' }}
       BACKFILL_OPEN: ${{ github.event_name == 'workflow_dispatch' && inputs.backfill_open }}
+      RETROFIT_HISTORY: ${{ github.event_name == 'workflow_dispatch' && inputs.retrofit_history }}
       DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) || github.event_name == 'push' }}
       GH_TOKEN: ${{ secrets.PROJECT_SCANNER_TOKEN }}
 
     steps:
-      - name: Checkout automation only
+      - name: Checkout controller
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -65,8 +75,20 @@ jobs:
           fi
           echo "::add-mask::$GH_TOKEN"
 
+      - name: Reconcile repository governance
+        shell: bash
+        run: |
+          set +x
+          node scripts/governance-reconcile.mjs
+
       - name: Sync work items
         shell: bash
         run: |
           set +x
           node scripts/development-hq-sync.mjs
+
+      - name: Reconcile Project metadata
+        shell: bash
+        run: |
+          set +x
+          node scripts/project-governance.mjs

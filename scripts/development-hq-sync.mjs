@@ -3,9 +3,10 @@ class SafeError extends Error {}
 const token = required('GH_TOKEN');
 const owner = env('PROJECT_OWNER', 'joaovpimenta');
 const projectNumber = intEnv('PROJECT_NUMBER', 2, 1, 1000000);
-const lookbackMinutes = intEnv('LOOKBACK_MINUTES', 90, 5, 10080);
+const lookbackMinutes = intEnv('LOOKBACK_MINUTES', 180, 30, 10080);
 const dryRun = boolEnv('DRY_RUN', false);
 const backfillOpen = boolEnv('BACKFILL_OPEN', false);
+const retrofitHistory = boolEnv('RETROFIT_HISTORY', false);
 const includeIssues = boolEnv('INCLUDE_ISSUES', true);
 const includePrs = boolEnv('INCLUDE_PRS', true);
 const minPermission = env('MIN_PERMISSION', 'push').toLowerCase();
@@ -13,7 +14,6 @@ const allowlist = csvSet('REPO_ALLOWLIST');
 const denylist = csvSet('REPO_DENYLIST');
 const debug = env('LOG_LEVEL', 'info').toLowerCase() === 'debug';
 
-// Never log token, request/response bodies, item titles/bodies, or private repo names.
 process.stdout.write(`::add-mask::${token}\n`);
 
 const counters = {
@@ -41,15 +41,10 @@ try {
   const eligible = repos.filter(isEligible);
   counters.eligible = eligible.length;
 
-  // Load current Project content once so repeated runs are idempotent without
-  // relying on mutation error behavior.
   const projectContentIds = await listProjectContentIds(projectId);
 
-  // Repository-scoped enumeration avoids the global Search API returning
-  // unrelated public issues/PRs. Backfill scans open work; incremental scans
-  // only items updated inside the overlap window.
   for (const repo of eligible) {
-    const items = await listRepoItems(repo.full_name, backfillOpen ? null : since);
+    const items = await listRepoItems(repo.full_name);
     for (const item of items) {
       const isPr = Boolean(item.pull_request);
       if ((isPr && !includePrs) || (!isPr && !includeIssues)) {
@@ -100,7 +95,7 @@ try {
   console.log(`Added: ${counters.added}`);
   console.log(`Filtered: ${counters.filtered}`);
   console.log(`Errors: ${counters.errors}`);
-  console.log(`Scope: ${backfillOpen ? 'OPEN BACKFILL' : `INCREMENTAL ${lookbackMinutes}m`}`);
+  console.log(`Scope: ${retrofitHistory ? 'FULL HISTORY' : backfillOpen ? 'OPEN BACKFILL' : `INCREMENTAL ${lookbackMinutes}m`}`);
   console.log(`Mode: ${dryRun ? 'DRY RUN' : 'APPLY'}`);
 }
 
@@ -126,23 +121,26 @@ function isEligible(repo) {
   return actualLevel >= requiredLevel;
 }
 
-async function listRepoItems(repoFullName, updatedSince) {
+async function listRepoItems(repoFullName) {
   const repoPath = repoFullName.split('/').map(encodeURIComponent).join('/');
   const out = [];
+
   for (let page = 1; page <= 100; page++) {
     const params = new URLSearchParams({
-      state: updatedSince ? 'all' : 'open',
+      state: retrofitHistory ? 'all' : backfillOpen ? 'open' : 'all',
       sort: 'updated',
       direction: 'desc',
       per_page: '100',
       page: String(page)
     });
-    if (updatedSince) params.set('since', updatedSince);
+
+    if (!retrofitHistory && !backfillOpen) params.set('since', since);
 
     const batch = await rest(`/repos/${repoPath}/issues?${params.toString()}`);
     out.push(...batch);
     if (batch.length < 100) break;
   }
+
   return out;
 }
 
@@ -210,7 +208,7 @@ function headers() {
   return {
     authorization: `Bearer ${token}`,
     accept: 'application/vnd.github+json',
-    'x-github-api-version': '2022-11-28',
+    'x-github-api-version': '2026-03-10',
     'user-agent': 'development-hq-sync'
   };
 }

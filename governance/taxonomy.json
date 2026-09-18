@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "type": [
+    {"value":"Epic","label":"type:epic","color":"8250df","description":"Large outcome composed of smaller work items"},
+    {"value":"Feature","label":"type:feature","color":"0969da","description":"New user or product capability"},
+    {"value":"Bug","label":"type:bug","color":"d1242f","description":"Defect or unexpected behavior"},
+    {"value":"Task","label":"type:task","color":"57606a","description":"Concrete implementation or operational task"},
+    {"value":"Tech Debt","label":"type:tech-debt","color":"bf8700","description":"Maintenance, refactoring, or debt reduction"},
+    {"value":"Research","label":"type:research","color":"1f883d","description":"Investigation, discovery, or technical research"}
+  ],
+  "area": [
+    {"value":"Frontend","label":"area:frontend","color":"54aeff","description":"Frontend and client UI"},
+    {"value":"Backend","label":"area:backend","color":"a371f7","description":"Backend services and APIs"},
+    {"value":"Design System","label":"area:design-system","color":"bf3989","description":"Design system, components, tokens, and UI foundations"},
+    {"value":"Mobile","label":"area:mobile","color":"3fb950","description":"Mobile applications and mobile-specific work"},
+    {"value":"Infra","label":"area:infra","color":"d29922","description":"Infrastructure, CI/CD, hosting, and operations"},
+    {"value":"Docs","label":"area:docs","color":"8c959f","description":"Documentation and developer guidance"},
+    {"value":"Security","label":"area:security","color":"f85149","description":"Security, privacy, permissions, and hardening"}
+  ],
+  "policyLabels": [
+    {"label":"policy:needs-triage","color":"fbca04","description":"Metadata is incomplete or ambiguous and needs human triage"}
+  ],
+  "priority": [
+    {"value":"P0","color":"RED","description":"Immediate and critical"},
+    {"value":"P1","color":"ORANGE","description":"Highest planned priority"},
+    {"value":"P2","color":"YELLOW","description":"Normal planned priority"},
+    {"value":"P3","color":"GRAY","description":"Low priority or backlog"}
+  ],
+  "status": [
+    {"value":"Inbox","color":"GRAY","description":"Not yet triaged"},
+    {"value":"Ready","color":"BLUE","description":"Ready to start"},
+    {"value":"In Progress","color":"YELLOW","description":"Actively being worked"},
+    {"value":"Review","color":"PURPLE","description":"Awaiting review or validation"},
+    {"value":"Blocked","color":"RED","description":"Cannot progress until a blocker is resolved"},
+    {"value":"Done","color":"GREEN","description":"Completed"}
+  ],
+  "rules": {
+    "typeCardinality": 1,
+    "areaMinimum": 1,
+    "unknownMetadataLabel": "policy:needs-triage",
+    "organizationSource": "repository_owner",
+    "productSource": "repository",
+    "prioritySource": "project_manual",
+    "dependenciesSource": "github_native"
+  }
+}
