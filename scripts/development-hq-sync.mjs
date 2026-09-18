@@ -5,6 +5,7 @@ const owner = env('PROJECT_OWNER', 'joaovpimenta');
 const projectNumber = intEnv('PROJECT_NUMBER', 2, 1, 1000000);
 const lookbackMinutes = intEnv('LOOKBACK_MINUTES', 90, 5, 10080);
 const dryRun = boolEnv('DRY_RUN', false);
+const backfillOpen = boolEnv('BACKFILL_OPEN', false);
 const includeIssues = boolEnv('INCLUDE_ISSUES', true);
 const includePrs = boolEnv('INCLUDE_PRS', true);
 const minPermission = env('MIN_PERMISSION', 'push').toLowerCase();
@@ -15,11 +16,23 @@ const debug = env('LOG_LEVEL', 'info').toLowerCase() === 'debug';
 // Never log token, request/response bodies, item titles/bodies, or private repo names.
 process.stdout.write(`::add-mask::${token}\n`);
 
-const counters = { discovered: 0, eligible: 0, changed: 0, added: 0, skipped: 0, errors: 0 };
+const counters = {
+  discovered: 0,
+  eligible: 0,
+  candidates: 0,
+  alreadyPresent: 0,
+  wouldAdd: 0,
+  added: 0,
+  filtered: 0,
+  errors: 0
+};
 const since = new Date(Date.now() - lookbackMinutes * 60_000).toISOString();
 
 try {
-  const project = await graphql(`query($login:String!,$number:Int!){ user(login:$login){ projectV2(number:$number){ id } } }`, { login: owner, number: projectNumber });
+  const project = await graphql(
+    `query($login:String!,$number:Int!){ user(login:$login){ projectV2(number:$number){ id } } }`,
+    { login: owner, number: projectNumber }
+  );
   const projectId = project.user?.projectV2?.id;
   if (!projectId) throw new SafeError('Configured Project was not found or token cannot access it.');
 
@@ -28,21 +41,45 @@ try {
   const eligible = repos.filter(isEligible);
   counters.eligible = eligible.length;
 
-  // Search is global to what the token can see; repo eligibility is checked again locally.
-  const kinds = [includeIssues && 'issue', includePrs && 'pr'].filter(Boolean);
-  for (const kind of kinds) {
-    const items = await searchChanged(kind, since);
+  // Load current Project content once so repeated runs are idempotent without
+  // relying on mutation error behavior.
+  const projectContentIds = await listProjectContentIds(projectId);
+
+  // Repository-scoped enumeration avoids the global Search API returning
+  // unrelated public issues/PRs. Backfill scans open work; incremental scans
+  // only items updated inside the overlap window.
+  for (const repo of eligible) {
+    const items = await listRepoItems(repo.full_name, backfillOpen ? null : since);
     for (const item of items) {
-      if (!eligible.some(r => r.full_name === item.repository_url.split('/repos/')[1])) {
-        counters.skipped++;
+      const isPr = Boolean(item.pull_request);
+      if ((isPr && !includePrs) || (!isPr && !includeIssues)) {
+        counters.filtered++;
         continue;
       }
-      counters.changed++;
-      if (dryRun) { counters.skipped++; continue; }
+
+      counters.candidates++;
+      const contentId = item.node_id;
+      if (!contentId) {
+        counters.filtered++;
+        continue;
+      }
+
+      if (projectContentIds.has(contentId)) {
+        counters.alreadyPresent++;
+        continue;
+      }
+
+      if (dryRun) {
+        counters.wouldAdd++;
+        continue;
+      }
+
       try {
-        const node = await rest(item.url);
-        if (!node.node_id) { counters.skipped++; continue; }
-        await graphql(`mutation($project:ID!,$content:ID!){ addProjectV2ItemById(input:{projectId:$project,contentId:$content}){ item{id} } }`, { project: projectId, content: node.node_id });
+        await graphql(
+          `mutation($project:ID!,$content:ID!){ addProjectV2ItemById(input:{projectId:$project,contentId:$content}){ item{id} } }`,
+          { project: projectId, content: contentId }
+        );
+        projectContentIds.add(contentId);
         counters.added++;
       } catch (error) {
         counters.errors++;
@@ -57,10 +94,13 @@ try {
   console.log('Development HQ Sync');
   console.log(`Repositories discovered: ${counters.discovered}`);
   console.log(`Repositories eligible: ${counters.eligible}`);
-  console.log(`Items changed in lookback window: ${counters.changed}`);
-  console.log(`Added/already present: ${counters.added}`);
-  console.log(`Skipped: ${counters.skipped}`);
+  console.log(`Candidate items: ${counters.candidates}`);
+  console.log(`Already in Project: ${counters.alreadyPresent}`);
+  console.log(`Would add: ${counters.wouldAdd}`);
+  console.log(`Added: ${counters.added}`);
+  console.log(`Filtered: ${counters.filtered}`);
   console.log(`Errors: ${counters.errors}`);
+  console.log(`Scope: ${backfillOpen ? 'OPEN BACKFILL' : `INCREMENTAL ${lookbackMinutes}m`}`);
   console.log(`Mode: ${dryRun ? 'DRY RUN' : 'APPLY'}`);
 }
 
@@ -86,15 +126,65 @@ function isEligible(repo) {
   return actualLevel >= requiredLevel;
 }
 
-async function searchChanged(kind, updatedSince) {
-  const query = `is:${kind} updated:>=${updatedSince.slice(0, 19)}Z`;
+async function listRepoItems(repoFullName, updatedSince) {
+  const repoPath = repoFullName.split('/').map(encodeURIComponent).join('/');
   const out = [];
-  for (let page = 1; page <= 10; page++) {
-    const data = await rest(`/search/issues?q=${encodeURIComponent(query)}&sort=updated&order=desc&per_page=100&page=${page}`);
-    out.push(...(data.items || []));
-    if ((data.items || []).length < 100) break;
+  for (let page = 1; page <= 100; page++) {
+    const params = new URLSearchParams({
+      state: updatedSince ? 'all' : 'open',
+      sort: 'updated',
+      direction: 'desc',
+      per_page: '100',
+      page: String(page)
+    });
+    if (updatedSince) params.set('since', updatedSince);
+
+    const batch = await rest(`/repos/${repoPath}/issues?${params.toString()}`);
+    out.push(...batch);
+    if (batch.length < 100) break;
   }
   return out;
+}
+
+async function listProjectContentIds(projectId) {
+  const ids = new Set();
+  let after = null;
+
+  for (let page = 1; page <= 500; page++) {
+    const data = await graphql(
+      `query($id:ID!,$after:String){
+        node(id:$id){
+          ... on ProjectV2 {
+            items(first:100,after:$after){
+              nodes {
+                content {
+                  __typename
+                  ... on Issue { id }
+                  ... on PullRequest { id }
+                }
+              }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }
+      }`,
+      { id: projectId, after }
+    );
+
+    const items = data.node?.items;
+    if (!items) throw new SafeError('Project items could not be read.');
+
+    for (const node of items.nodes || []) {
+      const id = node.content?.id;
+      if (id) ids.add(id);
+    }
+
+    if (!items.pageInfo?.hasNextPage) break;
+    after = items.pageInfo.endCursor;
+    if (!after) break;
+  }
+
+  return ids;
 }
 
 async function rest(path) {
@@ -106,7 +196,8 @@ async function rest(path) {
 
 async function graphql(query, variables) {
   const response = await fetch('https://api.github.com/graphql', {
-    method: 'POST', headers: { ...headers(), 'content-type': 'application/json' },
+    method: 'POST',
+    headers: { ...headers(), 'content-type': 'application/json' },
     body: JSON.stringify({ query, variables })
   });
   if (!response.ok) throw new SafeError(`GitHub GraphQL request failed (${response.status}).`);
@@ -116,7 +207,12 @@ async function graphql(query, variables) {
 }
 
 function headers() {
-  return { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'development-hq-sync' };
+  return {
+    authorization: `Bearer ${token}`,
+    accept: 'application/vnd.github+json',
+    'x-github-api-version': '2022-11-28',
+    'user-agent': 'development-hq-sync'
+  };
 }
 
 function safeError(prefix, error) {
