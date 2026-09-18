@@ -65,13 +65,10 @@ The existing classic PAT also needs the `workflow` scope to install managed work
 
 No repository registration is required when allowlist/denylist are empty.
 
-## Bootstrap required outside this repository
+## Owner-level .github repositories
 
-Create one public `.github` repository for every owner whose repositories should inherit the default Issue Form/PR template.
+They are optional.
 
-For the current structure this means at least:
+The controller installs canonical templates and the event caller directly into governed repositories, so governance does not depend on creating any new repository.
 
-- the personal account `.github` repository;
-- the Glucontinuum organization `.github` repository.
-
-After those repositories exist, the controller populates and maintains their template files automatically.
+When an owner-level public `.github` repository exists, the controller also mirrors the defaults there so GitHub can use them as native owner-scoped fallbacks.
