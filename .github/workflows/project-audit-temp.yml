@@ -80,7 +80,36 @@ jobs:
             const conn=data.node?.items; if(!conn) throw new Error('Project items unavailable');
             items.push(...conn.nodes); if(!conn.pageInfo.hasNextPage) break; after=conn.pageInfo.endCursor;
           }
-          const audit={capturedAt:new Date().toISOString(),project:{title:project.title,fields:project.fields.nodes,views:project.views.nodes},items};
+          const byOwner={}, byRepo={}, byKind={}, byState={}, byStatus={}, byLabel={}, byAssignee={}, fieldDistributions={};
+          for(const item of items){
+            const content=item.content||{};
+            const kind=content.__typename||item.type||'Unknown';
+            byKind[kind]=(byKind[kind]||0)+1;
+            if(content.state) byState[content.state]=(byState[content.state]||0)+1;
+            const repo=content.repository?.nameWithOwner;
+            const ownerLogin=content.repository?.owner?.login;
+            if(repo) byRepo[repo]=(byRepo[repo]||0)+1;
+            if(ownerLogin) byOwner[ownerLogin]=(byOwner[ownerLogin]||0)+1;
+            for(const l of content.labels?.nodes||[]) byLabel[l.name]=(byLabel[l.name]||0)+1;
+            const assignees=content.assignees?.nodes||[];
+            if(!assignees.length) byAssignee['(unassigned)']=(byAssignee['(unassigned)']||0)+1;
+            for(const a of assignees) byAssignee[a.login]=(byAssignee[a.login]||0)+1;
+            for(const fv of item.fieldValues?.nodes||[]){
+              const field=fv.field?.name;
+              if(!field) continue;
+              const value=fv.name ?? fv.title ?? fv.text ?? fv.number ?? fv.date;
+              if(value===undefined||value===null||value==='') continue;
+              fieldDistributions[field] ||= {};
+              fieldDistributions[field][String(value)]=(fieldDistributions[field][String(value)]||0)+1;
+              if(field==='Status') byStatus[String(value)]=(byStatus[String(value)]||0)+1;
+            }
+          }
+          const audit={
+            capturedAt:new Date().toISOString(),
+            project:{title:project.title,fields:project.fields.nodes,views:project.views.nodes},
+            itemCount:items.length,
+            byOwner,byRepo,byKind,byState,byStatus,byLabel,byAssignee,fieldDistributions
+          };
           const plaintext=Buffer.from(JSON.stringify(audit));
           const aesKey=crypto.randomBytes(32), iv=crypto.randomBytes(12);
           const cipher=crypto.createCipheriv('aes-256-gcm',aesKey,iv);
