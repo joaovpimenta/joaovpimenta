@@ -21,11 +21,11 @@ No repository names are registered manually. Repositories are discovered dynamic
 
 Each GitHub owner needs its own public repository named `.github` for account-level default community health files.
 
-The controller automatically copies the canonical Issue Form, issue-template configuration, and pull request template into every discovered owner-level `.github` repository that already exists.
+The controller also copies the canonical Issue Form, issue-template configuration, and pull request template directly into every governed repository. This is the enforcement path and means owner-level `.github` repositories are not required for governance to work.
 
-A personal `.github` repository does not govern repositories owned by an organization. Each owner has its own scope.
+If an owner-level `.github` repository exists, the controller mirrors the same defaults there as a native GitHub fallback for newly created repositories and other repositories not yet reconciled.
 
-The controller intentionally does not auto-create owner repositories. Creation is a one-time bootstrap because it changes account/organization structure and may require organization-level permissions.
+A personal `.github` repository only provides defaults for repositories owned by that personal account; an organization has its own owner scope. The controller intentionally does not auto-create owner repositories because they are optional and repository creation may require organization-level administrative permission.
 
 ## Canonical taxonomy
 
@@ -96,11 +96,9 @@ Unknown or inconsistent metadata receives `policy:needs-triage`. Automation does
 
 ## Event-driven enforcement
 
-The controller installs a tiny managed workflow at:
+The controller installs the canonical Issue Form/PR template and a tiny managed workflow directly in governed repositories. The workflow lives at:
 
-`.github/workflows/governance.yml`
-
-in governed repositories.
+`.github/workflows/governance.yml`.
 
 That caller invokes the public reusable workflow in this controller. The event workflow runs on Issue create/edit/reopen/label changes and reconciles Type/Area labels immediately using the Issue Form body.
 
