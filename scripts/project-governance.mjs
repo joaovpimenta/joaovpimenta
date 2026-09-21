@@ -218,22 +218,35 @@ async function ensureField(projectId, field, desired) {
     counters.fieldsWouldCreate++;
     if (dryRun) return;
 
-    const args = {
-      projectId,
-      name: desired.name,
-      dataType: desired.type
-    };
-    if (desired.type === 'SINGLE_SELECT') args.singleSelectOptions = desired.options;
-    if (desired.type === 'MULTI_SELECT') args.multiSelectOptions = desired.options;
-
-    await graphql(`
-      mutation($input:CreateProjectV2FieldInput!){
-        createProjectV2Field(input:$input){
-          projectV2Field { __typename }
-        }
-      }`,
-      { input: args }
-    );
+    if (desired.type === 'SINGLE_SELECT') {
+      await graphql(`
+        mutation($projectId:ID!,$name:String!,$options:[ProjectV2SingleSelectFieldOptionInput!]!){
+          createProjectV2Field(input:{
+            projectId:$projectId,
+            dataType:SINGLE_SELECT,
+            name:$name,
+            singleSelectOptions:$options
+          }){
+            projectV2Field { ... on ProjectV2SingleSelectField { id name } }
+          }
+        }`,
+        { projectId, name: desired.name, options: desired.options }
+      );
+    } else if (desired.type === 'MULTI_SELECT') {
+      await graphql(`
+        mutation($projectId:ID!,$name:String!,$options:[ProjectV2MultiSelectFieldOptionInput!]!){
+          createProjectV2Field(input:{
+            projectId:$projectId,
+            dataType:MULTI_SELECT,
+            name:$name,
+            multiSelectOptions:$options
+          }){
+            projectV2Field { ... on ProjectV2MultiSelectField { id name } }
+          }
+        }`,
+        { projectId, name: desired.name, options: desired.options }
+      );
+    }
     counters.fieldsCreated++;
     return;
   }
@@ -287,18 +300,25 @@ async function ensureField(projectId, field, desired) {
   counters.fieldsUpdated++;
   if (dryRun) return;
 
-  const input = { fieldId: field.id };
-  if (desired.type === 'SINGLE_SELECT') input.singleSelectOptions = merged;
-  if (desired.type === 'MULTI_SELECT') input.multiSelectOptions = merged;
-
-  await graphql(`
-    mutation($input:UpdateProjectV2FieldInput!){
-      updateProjectV2Field(input:$input){
-        projectV2Field { __typename }
-      }
-    }`,
-    { input }
-  );
+  if (desired.type === 'SINGLE_SELECT') {
+    await graphql(`
+      mutation($fieldId:ID!,$options:[ProjectV2SingleSelectFieldOptionInput!]!){
+        updateProjectV2Field(input:{fieldId:$fieldId,singleSelectOptions:$options}){
+          projectV2Field { ... on ProjectV2SingleSelectField { id name } }
+        }
+      }`,
+      { fieldId: field.id, options: merged }
+    );
+  } else if (desired.type === 'MULTI_SELECT') {
+    await graphql(`
+      mutation($fieldId:ID!,$options:[ProjectV2MultiSelectFieldOptionInput!]!){
+        updateProjectV2Field(input:{fieldId:$fieldId,multiSelectOptions:$options}){
+          projectV2Field { ... on ProjectV2MultiSelectField { id name } }
+        }
+      }`,
+      { fieldId: field.id, options: merged }
+    );
+  }
 }
 
 async function reconcileItem(projectId, item, fields) {
@@ -409,12 +429,12 @@ async function pruneKnownLegacyStatusOptions(project) {
   if (cleaned.length === (status.options || []).length) return;
 
   await graphql(`
-    mutation($input:UpdateProjectV2FieldInput!){
-      updateProjectV2Field(input:$input){
-        projectV2Field { ... on ProjectV2FieldCommon { id name } }
+    mutation($fieldId:ID!,$options:[ProjectV2SingleSelectFieldOptionInput!]!){
+      updateProjectV2Field(input:{fieldId:$fieldId,singleSelectOptions:$options}){
+        projectV2Field { ... on ProjectV2SingleSelectField { id name } }
       }
     }`,
-    { input: { fieldId: status.id, singleSelectOptions: cleaned } }
+    { fieldId: status.id, options: cleaned }
   );
   counters.fieldsUpdated++;
 }
