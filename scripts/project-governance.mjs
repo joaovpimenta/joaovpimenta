@@ -529,30 +529,33 @@ async function ensureViews(project) {
     );
     console.log(`Creating Project view: ${spec.name}`);
     try {
-      if (spec.name === 'Triage') {
+      if (['Triage', 'Pull Requests', 'Recently Done'].includes(spec.name)) {
         const created = await graphql(`
-          mutation($projectId:ID!,$visible:[ID!]){
+          mutation($projectId:ID!,$name:String!,$visible:[ID!]){
             createProjectV2View(input:{
               projectId:$projectId,
-              name:"Triage",
+              name:$name,
               layout:TABLE_LAYOUT,
               configuration:{visibleFieldIds:$visible}
             }){
               projectV2View { id name filter }
             }
           }`,
-          { projectId: project.id, visible: tableVisibleNodeIds }
+          { projectId: project.id, name: spec.name, visible: tableVisibleNodeIds }
         );
         const viewId = created.createProjectV2View?.projectV2View?.id;
-        if (!viewId) throw new SafeError('Triage view node ID was not returned.');
-        await graphql(`
-          mutation($viewId:ID!,$filter:String!){
-            updateProjectV2View(input:{viewId:$viewId,filter:$filter}){
-              projectV2View { id name filter }
-            }
-          }`,
-          { viewId, filter: 'label:"policy:needs-triage"' }
-        );
+        if (!viewId) throw new SafeError(`${spec.name} view node ID was not returned.`);
+        if (spec.filter) {
+          const filter = spec.name === 'Triage' ? 'label:"policy:needs-triage"' : spec.filter;
+          await graphql(`
+            mutation($viewId:ID!,$filter:String!){
+              updateProjectV2View(input:{viewId:$viewId,filter:$filter}){
+                projectV2View { id name filter }
+              }
+            }`,
+            { viewId, filter }
+          );
+        }
       } else {
         await rest(`/users/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/views`, { method: 'POST', body });
       }
