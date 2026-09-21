@@ -118,7 +118,11 @@ function isEligible(repo) {
   const levels = { pull: 1, triage: 2, push: 3, maintain: 4, admin: 5 };
   const requiredLevel = levels[minPermission] ?? levels.push;
   const actualLevel = p.admin ? 5 : p.maintain ? 4 : p.push ? 3 : p.triage ? 2 : p.pull ? 1 : 0;
-  return actualLevel >= requiredLevel;
+  if (actualLevel < requiredLevel) return false;
+
+  const ownedPersonally = repo.owner?.login?.toLowerCase() === owner.toLowerCase();
+  const organizationAdmin = repo.owner?.type === 'Organization' && Boolean(p.admin);
+  return ownedPersonally || organizationAdmin;
 }
 
 async function listRepoItems(repoFullName) {
