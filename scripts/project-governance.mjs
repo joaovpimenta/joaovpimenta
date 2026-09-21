@@ -565,7 +565,10 @@ async function graphql(query, variables) {
 
   if (!response.ok) throw new SafeError(`GitHub GraphQL request failed (${response.status}).`);
   const data = await response.json();
-  if (data.errors?.length) throw new SafeError('GitHub GraphQL operation was rejected.');
+  if (data.errors?.length) {
+    const messages = data.errors.map(error => String(error.message || 'unknown GraphQL error')).join(' | ');
+    throw new SafeError(`GitHub GraphQL operation was rejected: ${messages}`);
+  }
   return data.data;
 }
 
