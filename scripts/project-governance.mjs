@@ -518,8 +518,13 @@ async function ensureViews(project) {
     const body = Object.fromEntries(
       Object.entries(spec).filter(([, value]) => value !== undefined && (!Array.isArray(value) || value.length))
     );
-    await rest(`/users/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/views`, { method: 'POST', body });
-    counters.viewsCreated++;
+    console.log(`Creating Project view: ${spec.name}`);
+    try {
+      await rest(`/users/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/views`, { method: 'POST', body });
+      counters.viewsCreated++;
+    } catch (error) {
+      throw new SafeError(`Project view creation failed for ${spec.name}: ${error instanceof SafeError ? error.message : 'unexpected error'}`);
+    }
   }
 }
 
