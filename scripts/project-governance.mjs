@@ -452,7 +452,6 @@ async function ensureViews(project) {
   const product = fields.get('Product')?.databaseId;
   const updated = fields.get('Updated')?.databaseId;
 
-  const user = await rest(`/users/${encodeURIComponent(owner)}`);
   const names = new Set((project.views?.nodes || []).map(view => view.name));
 
   const commonVisible = [title, status, priority, type, area, organization, product, repository].filter(Number.isInteger);
@@ -519,7 +518,7 @@ async function ensureViews(project) {
     const body = Object.fromEntries(
       Object.entries(spec).filter(([, value]) => value !== undefined && (!Array.isArray(value) || value.length))
     );
-    await rest(`/users/${user.id}/projectsV2/${projectNumber}/views`, { method: 'POST', body });
+    await rest(`/users/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/views`, { method: 'POST', body });
     counters.viewsCreated++;
   }
 }
