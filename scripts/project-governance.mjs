@@ -485,7 +485,7 @@ async function ensureViews(project) {
     {
       name: 'Triage',
       layout: 'table',
-      filter: 'label:"policy:needs-triage"',
+      filter: 'label:*needs-triage*',
       visible_fields: tableVisible,
       sort_by: priority ? [[priority, 'asc']] : undefined,
       group_by: repository ? [repository] : undefined
