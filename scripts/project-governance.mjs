@@ -175,8 +175,8 @@ async function listProjectItems(projectId) {
 async function ensureProjectFields(project, organizations, products) {
   const current = new Map((project.fields?.nodes || []).map(field => [field.name, field]));
 
-  await ensureField(project.id, current.get('Type'), {
-    name: 'Type',
+  await ensureField(project.id, current.get('Work Type'), {
+    name: 'Work Type',
     type: 'SINGLE_SELECT',
     options: (policy.type || []).map((x, i) => option(x.value, projectColor(i), x.description))
   });
@@ -340,7 +340,7 @@ async function reconcileItem(projectId, item, fields) {
 
   const types = (policy.type || []).filter(x => labels.has(x.label));
   if (types.length === 1) {
-    await setSingle(projectId, item.id, fields.get('Type'), types[0].value, currentValues.get('Type'));
+    await setSingle(projectId, item.id, fields.get('Work Type'), types[0].value, currentValues.get('Work Type'));
   }
 
   const areas = (policy.area || []).filter(x => labels.has(x.label)).map(x => x.value);
@@ -447,7 +447,7 @@ async function ensureViews(project) {
   const priority = fields.get('Priority')?.databaseId;
   const organization = fields.get('Organization')?.databaseId;
   const repository = fields.get('Repository')?.databaseId;
-  const type = fields.get('Type')?.databaseId;
+  const type = fields.get('Work Type')?.databaseId;
   const area = fields.get('Area')?.databaseId;
   const product = fields.get('Product')?.databaseId;
   const updated = fields.get('Updated')?.databaseId;
