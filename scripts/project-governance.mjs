@@ -518,7 +518,25 @@ async function ensureViews(project) {
     );
     console.log(`Creating Project view: ${spec.name}`);
     try {
-      await rest(`/users/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/views`, { method: 'POST', body });
+      if (spec.name === 'Triage') {
+        const { filter, ...createBody } = body;
+        const created = await rest(`/users/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/views`, {
+          method: 'POST',
+          body: createBody
+        });
+        const viewId = created?.value?.node_id;
+        if (!viewId) throw new SafeError('Triage view node ID was not returned.');
+        await graphql(`
+          mutation($viewId:ID!,$filter:String!){
+            updateProjectV2View(input:{viewId:$viewId,filter:$filter}){
+              projectV2View { id name filter }
+            }
+          }`,
+          { viewId, filter: 'label:"policy:needs-triage"' }
+        );
+      } else {
+        await rest(`/users/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/views`, { method: 'POST', body });
+      }
       counters.viewsCreated++;
     } catch (error) {
       throw new SafeError(`Project view creation failed for ${spec.name}: ${error instanceof SafeError ? error.message : 'unexpected error'}`);
