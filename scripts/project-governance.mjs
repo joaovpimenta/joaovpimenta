@@ -229,7 +229,7 @@ async function ensureField(projectId, field, desired) {
     await graphql(`
       mutation($input:CreateProjectV2FieldInput!){
         createProjectV2Field(input:$input){
-          projectV2Field { ... on ProjectV2FieldCommon { id name } }
+          projectV2Field { __typename }
         }
       }`,
       { input: args }
@@ -294,7 +294,7 @@ async function ensureField(projectId, field, desired) {
   await graphql(`
     mutation($input:UpdateProjectV2FieldInput!){
       updateProjectV2Field(input:$input){
-        projectV2Field { ... on ProjectV2FieldCommon { id name } }
+        projectV2Field { __typename }
       }
     }`,
     { input }
