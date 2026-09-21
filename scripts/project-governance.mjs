@@ -471,8 +471,6 @@ async function ensureViews(project) {
       name: 'By Repository',
       layout: 'table',
       filter: 'is:open',
-      visible_fields: tableVisible,
-      sort_by: priority ? [[priority, 'asc']] : undefined,
       group_by: repository ? [repository] : undefined
     },
     {
