@@ -1,4 +1,4 @@
-name: Project Governance Apply Temporary
+name: Project Governance Diagnose Temporary
 
 on:
   push:
@@ -11,21 +11,15 @@ permissions:
   contents: read
 
 jobs:
-  apply:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     env:
       PROJECT_OWNER: ${{ vars.DEVELOPMENT_HQ_PROJECT_OWNER || 'joaovpimenta' }}
       PROJECT_NUMBER: ${{ vars.DEVELOPMENT_HQ_PROJECT_NUMBER || '2' }}
-      DRY_RUN: 'false'
       GH_TOKEN: ${{ secrets.PROJECT_SCANNER_TOKEN }}
 
     steps:
-      - name: Checkout controller
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
       - name: Validate secret and mask it
         shell: bash
         run: |
@@ -33,8 +27,50 @@ jobs:
           test -n "$GH_TOKEN" || { echo 'Missing required secret PROJECT_SCANNER_TOKEN.' >&2; exit 1; }
           echo "::add-mask::$GH_TOKEN"
 
-      - name: Apply Project governance
+      - name: Inspect Project fields
         shell: bash
         run: |
           set +x
-          node scripts/project-governance.mjs
+          node <<'NODE'
+          const query = `query($login:String!,$number:Int!){
+            user(login:$login){
+              projectV2(number:$number){
+                title
+                fields(first:100){
+                  nodes{
+                    __typename
+                    ... on ProjectV2Field { name dataType }
+                    ... on ProjectV2SingleSelectField { name dataType options { name } }
+                    ... on ProjectV2MultiSelectField { name dataType multiSelectOptions { name } }
+                  }
+                }
+              }
+            }
+          }`;
+          const response = await fetch('https://api.github.com/graphql', {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${process.env.GH_TOKEN}`,
+              accept: 'application/vnd.github+json',
+              'content-type': 'application/json',
+              'x-github-api-version': '2026-03-10'
+            },
+            body: JSON.stringify({query, variables: {login: process.env.PROJECT_OWNER, number: Number(process.env.PROJECT_NUMBER)}})
+          });
+          const json = await response.json();
+          if (!response.ok || json.errors?.length) {
+            console.error('Project inspection failed.');
+            for (const error of (json.errors || [])) console.error('GraphQL:', error.message);
+            process.exit(1);
+          }
+          const project = json.data.user?.projectV2;
+          if (!project) {
+            console.error('Project not found.');
+            process.exit(1);
+          }
+          console.log('Project:', project.title);
+          for (const field of project.fields.nodes) {
+            const options = field.options || field.multiSelectOptions || [];
+            console.log(`${field.name} | ${field.__typename} | ${field.dataType || ''} | ${options.map(x => x.name).join(',')}`);
+          }
+          NODE
