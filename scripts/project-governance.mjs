@@ -456,6 +456,17 @@ async function ensureViews(project) {
 
   const commonVisible = [title, status, priority, type, area, organization, product, repository].filter(Number.isInteger);
   const tableVisible = [...commonVisible, updated].filter(Number.isInteger);
+  const tableVisibleNodeIds = [
+    fields.get('Title')?.id,
+    fields.get('Status')?.id,
+    fields.get('Priority')?.id,
+    fields.get('Work Type')?.id,
+    fields.get('Area')?.id,
+    fields.get('Organization')?.id,
+    fields.get('Product')?.id,
+    fields.get('Repository')?.id,
+    fields.get('Updated')?.id
+  ].filter(Boolean);
 
   const specs = [
     {
@@ -519,12 +530,20 @@ async function ensureViews(project) {
     console.log(`Creating Project view: ${spec.name}`);
     try {
       if (spec.name === 'Triage') {
-        const { filter, ...createBody } = body;
-        const created = await rest(`/users/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/views`, {
-          method: 'POST',
-          body: createBody
-        });
-        const viewId = created?.value?.node_id;
+        const created = await graphql(`
+          mutation($projectId:ID!,$visible:[ID!]){
+            createProjectV2View(input:{
+              projectId:$projectId,
+              name:"Triage",
+              layout:TABLE,
+              configuration:{visibleFieldIds:$visible}
+            }){
+              projectV2View { id name filter }
+            }
+          }`,
+          { projectId: project.id, visible: tableVisibleNodeIds }
+        );
+        const viewId = created.createProjectV2View?.projectV2View?.id;
         if (!viewId) throw new SafeError('Triage view node ID was not returned.');
         await graphql(`
           mutation($viewId:ID!,$filter:String!){
