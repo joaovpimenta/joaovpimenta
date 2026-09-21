@@ -535,7 +535,7 @@ async function ensureViews(project) {
             createProjectV2View(input:{
               projectId:$projectId,
               name:"Triage",
-              layout:TABLE,
+              layout:TABLE_LAYOUT,
               configuration:{visibleFieldIds:$visible}
             }){
               projectV2View { id name filter }
