@@ -24,6 +24,7 @@ const counters = {
   repoTemplatesCreated: 0,
   repoTemplatesUpdated: 0,
   repoTemplateConflicts: 0,
+  emptyRepositoriesDeferred: 0,
   ownerDefaultsSynced: 0,
   ownerDefaultsMissing: 0,
   ownerDefaultsInvalid: 0,
@@ -45,8 +46,12 @@ try {
     try {
       await ensureLabels(repo);
       if (repo.name !== '.github') {
-        await ensureCaller(repo);
-        await ensureRepoTemplates(repo);
+        if (Number(repo.size || 0) === 0) {
+          counters.emptyRepositoriesDeferred++;
+        } else {
+          await ensureCaller(repo);
+          await ensureRepoTemplates(repo);
+        }
       }
       await normalizeRecentIssues(repo);
     } catch (error) {
@@ -80,6 +85,7 @@ try {
   console.log(`Repo templates created: ${counters.repoTemplatesCreated}`);
   console.log(`Repo templates updated: ${counters.repoTemplatesUpdated}`);
   console.log(`Repo template conflicts: ${counters.repoTemplateConflicts}`);
+  console.log(`Empty repositories deferred: ${counters.emptyRepositoriesDeferred}`);
   console.log(`Owner defaults synced: ${counters.ownerDefaultsSynced}`);
   console.log(`Owner defaults missing: ${counters.ownerDefaultsMissing}`);
   console.log(`Owner defaults invalid: ${counters.ownerDefaultsInvalid}`);
