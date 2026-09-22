@@ -477,7 +477,7 @@ async function getContent(repoName, path) {
   try {
     return await rest(`/repos/${repoName}/contents/${encodePath(path)}`);
   } catch (error) {
-    if (error instanceof SafeError && error.status === 404) return null;
+    if (error instanceof SafeError && (error.status === 404 || error.status === 409)) return null;
     throw error;
   }
 }
