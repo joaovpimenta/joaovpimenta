@@ -114,3 +114,11 @@ console.log('Definitive mismatches: '+definitive.length);
 for(const x of definitive) console.log('MISMATCH '+x.kind+' | '+x.type+' | '+x.repo+'#'+x.number+' | status='+(x.status||'(unset)'));
 console.log('Questionable states: '+questionable.length);
 for(const x of questionable) console.log('CHECK '+x.kind+' | '+x.repo+'#'+x.number+' | status='+x.status);
+
+for (const item of items) {
+  const status=item.fieldValueByName?.name || null;
+  if (!['In Progress','Ready','Review','Blocked'].includes(status)) continue;
+  const c=item.content;
+  if (!c) continue;
+  console.log('ACTIVE '+status+' | '+c.__typename+' | '+c.repository?.nameWithOwner+'#'+c.number+' | state='+c.state+' | updated='+c.updatedAt);
+}
