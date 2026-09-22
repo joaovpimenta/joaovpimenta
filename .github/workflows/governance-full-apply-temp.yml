@@ -1,4 +1,4 @@
-name: Governance Full Apply Temporary
+name: Governance Full Apply Temporary # retry-empty-repos
 
 on:
   push:
