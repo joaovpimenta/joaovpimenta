@@ -1,0 +1,36 @@
+name: Project Status Audit Temporary
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/project-status-audit-temp.yml'
+      - 'scripts/project-status-audit.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT_OWNER: \${{ vars.DEVELOPMENT_HQ_PROJECT_OWNER || 'joaovpimenta' }}
+      PROJECT_NUMBER: \${{ vars.DEVELOPMENT_HQ_PROJECT_NUMBER || '2' }}
+      GH_TOKEN: \${{ secrets.PROJECT_SCANNER_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate secret
+        shell: bash
+        run: |
+          set +x
+          test -n "$GH_TOKEN" || { echo 'Missing PROJECT_SCANNER_TOKEN' >&2; exit 1; }
+          echo "::add-mask::$GH_TOKEN"
+      - name: Audit Project statuses
+        shell: bash
+        run: |
+          set +x
+          node scripts/project-status-audit.mjs
