@@ -1,25 +1,32 @@
 # Reference thin caller template for participating repositories.
-# Opt-in per repository (not auto-installed globally without rollout approval).
+# Pipeline behavior is governed strictly by the target repository's GitHub Actions Variables (vars.QLTY_*).
+# Required repository variables:
+#   QLTY_SCOPE, QLTY_ENFORCEMENT, QLTY_VERSION, QLTY_POLICY_REF,
+#   QLTY_ENABLE_SMELLS, QLTY_ENABLE_METRICS
+# Optional repository variables:
+#   QLTY_ADVISORY_PLUGINS, QLTY_BLOCK_SMELLS, QLTY_ARTIFACT_RETENTION_DAYS
 name: Quality
 
 on:
   pull_request:
   workflow_dispatch:
     inputs:
-      scope:
-        description: 'Analysis scope (pr or full)'
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE (pr or full)'
         required: false
-        default: 'full'
+        default: ''
         type: choice
         options:
+          - ''
           - pr
           - full
-      enforcement:
-        description: 'Gate enforcement level'
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT'
         required: false
-        default: 'standard'
+        default: ''
         type: choice
         options:
+          - ''
           - report-only
           - standard
           - strict
@@ -33,9 +40,7 @@ permissions:
 
 jobs:
   quality:
-    uses: joaovpimenta/joaovpimenta/.github/workflows/quality.yml@qlty-v0.1.0
+    uses: joaovpimenta/joaovpimenta/.github/workflows/quality.yml@qlty-v0.2.0
     with:
-      scope: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || 'pr' }}
-      enforcement: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement || 'standard' }}
-      qlty_version: '0.672.0'
-      policy_ref: 'qlty-v0.1.0'
+      scope_override: ${{ github.event_name == 'workflow_dispatch' && inputs.scope_override || '' }}
+      enforcement_override: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement_override || '' }}

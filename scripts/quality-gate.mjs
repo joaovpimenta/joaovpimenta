@@ -462,6 +462,150 @@ export function formatMarkdownSummary(report) {
   return lines.join('\n');
 }
 
+const VALID_SCOPES = new Set(['pr', 'full']);
+const VALID_ENFORCEMENTS = new Set(['report-only', 'standard', 'strict']);
+const VALID_BOOLEANS = new Set(['true', 'false']);
+const SEMVER_RE = /^[0-9]+\.[0-9]+\.[0-9]+$/;
+const POLICY_REF_RE = /^[A-Za-z0-9._/-]+$/;
+const ADVISORY_PLUGINS_RE = /^[A-Za-z0-9_,-]+$/;
+
+export const REQUIRED_PROJECT_VARS = [
+  { name: 'QLTY_SCOPE', accepted: '`pr` ou `full`', example: 'pr' },
+  { name: 'QLTY_ENFORCEMENT', accepted: '`report-only`, `standard` ou `strict`', example: 'standard' },
+  { name: 'QLTY_VERSION', accepted: 'SemVer sem `v`', example: '0.672.0' },
+  { name: 'QLTY_POLICY_REF', accepted: 'Tag ou SHA em `joaovpimenta/joaovpimenta`', example: 'qlty-v0.2.0' },
+  { name: 'QLTY_ENABLE_SMELLS', accepted: '`true` ou `false`', example: 'true' },
+  { name: 'QLTY_ENABLE_METRICS', accepted: '`true` ou `false`', example: 'true' },
+];
+
+export function validateProjectVariables(varsMap = {}, overrides = {}) {
+  const read = (key) => String(varsMap[key] ?? '').trim();
+  const problems = [];
+
+  const scope = read('QLTY_SCOPE');
+  if (!scope) {
+    problems.push('Variável obrigatória ausente: `QLTY_SCOPE` (esperado: `pr` ou `full`).');
+  } else if (!VALID_SCOPES.has(scope)) {
+    problems.push(`Valor inválido em \`QLTY_SCOPE\`: \`${scope}\` (esperado: \`pr\` ou \`full\`).`);
+  }
+
+  const enforcement = read('QLTY_ENFORCEMENT');
+  if (!enforcement) {
+    problems.push('Variável obrigatória ausente: `QLTY_ENFORCEMENT` (esperado: `report-only`, `standard` ou `strict`).');
+  } else if (!VALID_ENFORCEMENTS.has(enforcement)) {
+    problems.push(
+      `Valor inválido em \`QLTY_ENFORCEMENT\`: \`${enforcement}\` (esperado: \`report-only\`, \`standard\` ou \`strict\`).`,
+    );
+  }
+
+  const qltyVersion = read('QLTY_VERSION');
+  if (!qltyVersion) {
+    problems.push('Variável obrigatória ausente: `QLTY_VERSION` (esperado: versão SemVer sem `v`, ex.: `0.672.0`).');
+  } else if (!SEMVER_RE.test(qltyVersion)) {
+    problems.push(`Valor inválido em \`QLTY_VERSION\`: \`${qltyVersion}\` (esperado: \`X.Y.Z\`, ex.: \`0.672.0\`).`);
+  }
+
+  const policyRef = read('QLTY_POLICY_REF');
+  if (!policyRef) {
+    problems.push('Variável obrigatória ausente: `QLTY_POLICY_REF` (esperado: tag ou SHA, ex.: `qlty-v0.2.0`).');
+  } else if (!POLICY_REF_RE.test(policyRef)) {
+    problems.push(`Valor inválido em \`QLTY_POLICY_REF\`: \`${policyRef}\`.`);
+  }
+
+  const enableSmells = read('QLTY_ENABLE_SMELLS');
+  if (!enableSmells) {
+    problems.push('Variável obrigatória ausente: `QLTY_ENABLE_SMELLS` (esperado: `true` ou `false`).');
+  } else if (!VALID_BOOLEANS.has(enableSmells)) {
+    problems.push(`Valor inválido em \`QLTY_ENABLE_SMELLS\`: \`${enableSmells}\` (esperado: \`true\` ou \`false\`).`);
+  }
+
+  const enableMetrics = read('QLTY_ENABLE_METRICS');
+  if (!enableMetrics) {
+    problems.push('Variável obrigatória ausente: `QLTY_ENABLE_METRICS` (esperado: `true` ou `false`).');
+  } else if (!VALID_BOOLEANS.has(enableMetrics)) {
+    problems.push(`Valor inválido em \`QLTY_ENABLE_METRICS\`: \`${enableMetrics}\` (esperado: \`true\` ou \`false\`).`);
+  }
+
+  const rawBlockSmells = read('QLTY_BLOCK_SMELLS');
+  const blockSmells = rawBlockSmells || 'false';
+  if (rawBlockSmells && !VALID_BOOLEANS.has(rawBlockSmells)) {
+    problems.push(`Valor inválido em \`QLTY_BLOCK_SMELLS\`: \`${rawBlockSmells}\` (esperado: \`true\` ou \`false\`).`);
+  }
+
+  const rawRetention = read('QLTY_ARTIFACT_RETENTION_DAYS');
+  let artifactRetentionDays = 7;
+  if (rawRetention) {
+    if (!/^[0-9]+$/.test(rawRetention) || Number(rawRetention) < 1 || Number(rawRetention) > 90) {
+      problems.push(
+        `Valor inválido em \`QLTY_ARTIFACT_RETENTION_DAYS\`: \`${rawRetention}\` (esperado: inteiro entre \`1\` e \`90\`).`,
+      );
+    } else {
+      artifactRetentionDays = Number(rawRetention);
+    }
+  }
+
+  const advisoryPlugins = read('QLTY_ADVISORY_PLUGINS').replace(/\s+/g, '');
+  if (advisoryPlugins && !ADVISORY_PLUGINS_RE.test(advisoryPlugins)) {
+    problems.push(`Valor inválido em \`QLTY_ADVISORY_PLUGINS\`: \`${advisoryPlugins}\` (esperado: lista CSV de plugins).`);
+  }
+
+  const scopeOverride = String(overrides.scopeOverride ?? '').trim();
+  if (scopeOverride && !VALID_SCOPES.has(scopeOverride)) {
+    problems.push(`Valor inválido em \`scope_override\`: \`${scopeOverride}\` (esperado: \`pr\` ou \`full\`).`);
+  }
+
+  const enforcementOverride = String(overrides.enforcementOverride ?? '').trim();
+  if (enforcementOverride && !VALID_ENFORCEMENTS.has(enforcementOverride)) {
+    problems.push(
+      `Valor inválido em \`enforcement_override\`: \`${enforcementOverride}\` (esperado: \`report-only\`, \`standard\` ou \`strict\`).`,
+    );
+  }
+
+  const valid = problems.length === 0;
+  return {
+    valid,
+    justification: valid
+      ? null
+      : 'A esteira precisa ser corrigida: variáveis de ambiente obrigatórias do Qlty estão ausentes ou inválidas neste repositório.',
+    problems,
+    config: valid
+      ? {
+          scope: scopeOverride || scope,
+          enforcement: enforcementOverride || enforcement,
+          qltyVersion,
+          policyRef,
+          enableSmells: enableSmells === 'true',
+          enableMetrics: enableMetrics === 'true',
+          blockSmells: blockSmells === 'true',
+          advisoryPlugins,
+          artifactRetentionDays,
+        }
+      : null,
+  };
+}
+
+export function formatConfigErrorSummary(validation) {
+  const lines = [
+    '## Qlty Code Quality Gate — ERRO DE CONFIGURAÇÃO (A esteira precisa ser corrigida)',
+    '',
+    validation.justification,
+    '',
+    'Configure as variáveis em **Settings → Secrets and variables → Actions → Variables** (ou via `gh variable set`).',
+    '',
+    '### Problemas encontrados',
+    '',
+    ...validation.problems.map((problem) => `- ${problem}`),
+    '',
+    '### Variáveis obrigatórias do projeto',
+    '',
+    '| Variável | Valores aceitos | Exemplo |',
+    '|---|---|---|',
+    ...REQUIRED_PROJECT_VARS.map((item) => `| \`${item.name}\` | ${item.accepted} | \`${item.example}\` |`),
+    '',
+  ];
+  return lines.join('\n');
+}
+
 function escapeMd(value) {
   return String(value || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
@@ -478,29 +622,65 @@ function intEnv(name, fallback = undefined) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function boolEnv(name, fallback = false) {
-  const raw = String(process.env[name] ?? '').trim().toLowerCase();
-  if (!raw) return fallback;
-  return ['1', 'true', 'yes', 'on'].includes(raw);
+function requiredChoiceEnv(name, allowed, errors) {
+  const value = String(process.env[name] ?? '').trim();
+  if (!value) {
+    errors.push(`Variável obrigatória ausente na execução do gate: \`${name}\`.`);
+    return '';
+  }
+  if (allowed && !allowed.has(value)) {
+    errors.push(`Valor inválido em \`${name}\`: \`${value}\`.`);
+  }
+  return value;
 }
 
 function runCli() {
+  const envErrors = [];
+  const scope = requiredChoiceEnv('QUALITY_SCOPE', VALID_SCOPES, envErrors);
+  const enforcement = requiredChoiceEnv('QUALITY_ENFORCEMENT', VALID_ENFORCEMENTS, envErrors);
+  const qltyVersion = requiredChoiceEnv('QUALITY_QLTY_VERSION', null, envErrors);
+  const smellsEnabledRaw = requiredChoiceEnv('QUALITY_SMELLS_ENABLED', VALID_BOOLEANS, envErrors);
+  const metricsEnabledRaw = requiredChoiceEnv('QUALITY_METRICS_ENABLED', VALID_BOOLEANS, envErrors);
+  const blockSmellsRaw = String(process.env.QUALITY_BLOCK_SMELLS ?? 'false').trim();
+  if (!VALID_BOOLEANS.has(blockSmellsRaw)) {
+    envErrors.push(`Valor inválido em \`QUALITY_BLOCK_SMELLS\`: \`${blockSmellsRaw}\`.`);
+  }
+
+  if (envErrors.length > 0) {
+    const justification =
+      'A esteira precisa ser corrigida: variáveis de ambiente obrigatórias do Qlty estão ausentes ou inválidas.';
+    console.error(`::error title=Esteira precisa ser corrigida::${justification}`);
+    for (const err of envErrors) {
+      console.error(`::error title=Variável obrigatória ausente ou inválida::${err}`);
+    }
+    const summaryPath = process.env.QUALITY_SUMMARY_PATH || process.env.GITHUB_STEP_SUMMARY;
+    if (summaryPath) {
+      fs.appendFileSync(
+        summaryPath,
+        `${formatConfigErrorSummary({ valid: false, justification, problems: envErrors })}\n`,
+        'utf8',
+      );
+    }
+    process.exitCode = 1;
+    return;
+  }
+
   const checkSarifRaw = readOptionalFile(process.env.QUALITY_CHECK_SARIF);
   const smellsSarifRaw = readOptionalFile(process.env.QUALITY_SMELLS_SARIF);
   const report = evaluateQualityGate({
-    scope: process.env.QUALITY_SCOPE || 'pr',
-    enforcement: process.env.QUALITY_ENFORCEMENT || 'standard',
-    qltyVersion: process.env.QUALITY_QLTY_VERSION || 'unknown',
+    scope,
+    enforcement,
+    qltyVersion,
     baseRef: process.env.QUALITY_BASE_REF || null,
     advisoryPlugins: (process.env.QUALITY_ADVISORY_PLUGINS || '').split(','),
-    blockSmells: boolEnv('QUALITY_BLOCK_SMELLS', false),
+    blockSmells: blockSmellsRaw === 'true',
     configValidateExit: intEnv('QUALITY_CONFIG_VALIDATE_EXIT', 0),
     checkExit: intEnv('QUALITY_CHECK_EXIT'),
     checkSarifRaw,
-    smellsEnabled: boolEnv('QUALITY_SMELLS_ENABLED', true),
+    smellsEnabled: smellsEnabledRaw === 'true',
     smellsExit: intEnv('QUALITY_SMELLS_EXIT'),
     smellsSarifRaw,
-    metricsEnabled: boolEnv('QUALITY_METRICS_ENABLED', true),
+    metricsEnabled: metricsEnabledRaw === 'true',
     metricsExit: intEnv('QUALITY_METRICS_EXIT', 0),
     metricsRaw: readOptionalFile(process.env.QUALITY_METRICS_FILE),
   });

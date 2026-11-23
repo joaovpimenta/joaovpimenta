@@ -1,12 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   evaluateQualityGate,
+  formatConfigErrorSummary,
   formatMarkdownSummary,
   parseMetricsOutput,
   parseSarif,
   redactText,
   sanitizeSarif,
+  validateProjectVariables,
 } from './quality-gate.mjs';
 
 function sarif(results = []) {
@@ -343,4 +348,85 @@ test('sanitizeSarif scrubs secret values, snippets, and secret partialFingerprin
   const parsed = JSON.parse(clean);
   assert.equal(parsed.runs[0].results[0].partialFingerprints, undefined);
   assert.equal(parsed.runs[0].results[0].locations[0].physicalLocation.region.snippet, undefined);
+});
+
+test('validateProjectVariables fails with explicit pipeline fix justification when required vars are missing', () => {
+  const result = validateProjectVariables({});
+  assert.equal(result.valid, false);
+  assert.equal(result.config, null);
+  assert.match(result.justification, /A esteira precisa ser corrigida/i);
+  assert.equal(result.problems.length, 6);
+  for (const name of [
+    'QLTY_SCOPE',
+    'QLTY_ENFORCEMENT',
+    'QLTY_VERSION',
+    'QLTY_POLICY_REF',
+    'QLTY_ENABLE_SMELLS',
+    'QLTY_ENABLE_METRICS',
+  ]) {
+    assert.ok(result.problems.some((p) => p.includes(name)), `Expected missing var ${name} to be reported`);
+  }
+
+  const summary = formatConfigErrorSummary(result);
+  assert.match(summary, /A esteira precisa ser corrigida/i);
+  assert.match(summary, /QLTY_POLICY_REF/);
+});
+
+test('validateProjectVariables rejects invalid values for required and optional vars', () => {
+  const result = validateProjectVariables({
+    QLTY_SCOPE: 'branch',
+    QLTY_ENFORCEMENT: 'loose',
+    QLTY_VERSION: 'latest',
+    QLTY_POLICY_REF: 'bad ref with spaces',
+    QLTY_ENABLE_SMELLS: 'yes',
+    QLTY_ENABLE_METRICS: '1',
+    QLTY_BLOCK_SMELLS: 'maybe',
+    QLTY_ARTIFACT_RETENTION_DAYS: '120',
+    QLTY_ADVISORY_PLUGINS: 'osv-scanner;rm -rf /',
+  });
+
+  assert.equal(result.valid, false);
+  assert.equal(result.problems.length, 9);
+});
+
+test('validateProjectVariables resolves valid project variables and applies optional overrides', () => {
+  const result = validateProjectVariables(
+    {
+      QLTY_SCOPE: 'pr',
+      QLTY_ENFORCEMENT: 'standard',
+      QLTY_VERSION: '0.672.0',
+      QLTY_POLICY_REF: 'qlty-v0.2.0',
+      QLTY_ENABLE_SMELLS: 'true',
+      QLTY_ENABLE_METRICS: 'false',
+      QLTY_ADVISORY_PLUGINS: 'osv-scanner, zizmor',
+    },
+    { scopeOverride: 'full', enforcementOverride: 'report-only' },
+  );
+
+  assert.equal(result.valid, true);
+  assert.equal(result.justification, null);
+  assert.deepEqual(result.config, {
+    scope: 'full',
+    enforcement: 'report-only',
+    qltyVersion: '0.672.0',
+    policyRef: 'qlty-v0.2.0',
+    enableSmells: true,
+    enableMetrics: false,
+    blockSmells: false,
+    advisoryPlugins: 'osv-scanner,zizmor',
+    artifactRetentionDays: 7,
+  });
+});
+
+test('CLI fails closed with pipeline fix justification when required QUALITY_* env vars are absent', () => {
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'quality-gate.mjs');
+  const res = spawnSync(process.execPath, [scriptPath], {
+    env: { PATH: process.env.PATH },
+    encoding: 'utf8',
+  });
+
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /A esteira precisa ser corrigida/i);
+  assert.match(res.stderr, /QUALITY_SCOPE/);
+  assert.match(res.stderr, /QUALITY_ENFORCEMENT/);
 });

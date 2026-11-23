@@ -22,15 +22,51 @@ Zero-cost, locally executed static analysis and maintainability governance using
 ## Configuration layering and merging
 
 1. Built-in Qlty `default` source supplies analyzer definitions.
-2. `personal-quality-policy` (`https://github.com/joaovpimenta/joaovpimenta.git`, pinned `tag = "qlty-v0.1.0"`) provides shared exclusions, test patterns, and maintainability smell thresholds.
+2. `personal-quality-policy` (`https://github.com/joaovpimenta/joaovpimenta.git`, pinned `tag = "qlty-v0.2.0"`) provides shared exclusions, test patterns, and maintainability smell thresholds.
 3. Project `.qlty/qlty.toml` enables only the analyzers relevant to that repository and overrides any threshold or exclusion as needed.
-4. CI workflow inputs control scope (`pr` vs `full`) and enforcement (`report-only`, `standard`, `strict`).
+4. **Per-project GitHub Actions Variables (`vars.QLTY_*`)** govern the CI pipeline behavior for each repository (no silent defaults for required settings). Optional `workflow_dispatch` inputs (`scope_override`, `enforcement_override`) may override scope/enforcement for ad-hoc audits.
 
 Inspect the effective merged configuration in any repository with:
 
 ```bash
 QLTY_TELEMETRY=off qlty config validate --no-upgrade-check
 QLTY_TELEMETRY=off qlty config show --no-upgrade-check
+```
+
+## Per-project environment variables (`vars.QLTY_*`)
+
+The reusable workflow reads `${{ vars.QLTY_* }}` directly from the **caller repository** (`Settings -> Secrets and variables -> Actions -> Variables`).
+
+**Fail-closed rule:** if any required variable is missing or invalid (or `.qlty/qlty.toml` is absent), the pipeline fails immediately at step 1 with an explicit `::error::` annotation and Job Summary stating that **a esteira precisa ser corrigida** before running.
+
+### Required variables
+
+| Variable | Accepted values | Example |
+|---|---|---|
+| `QLTY_SCOPE` | `pr` or `full` | `pr` |
+| `QLTY_ENFORCEMENT` | `report-only`, `standard`, or `strict` | `standard` |
+| `QLTY_VERSION` | Pinned SemVer without leading `v` | `0.672.0` |
+| `QLTY_POLICY_REF` | Pinned tag or SHA in `joaovpimenta/joaovpimenta` | `qlty-v0.2.0` |
+| `QLTY_ENABLE_SMELLS` | `true` or `false` | `true` |
+| `QLTY_ENABLE_METRICS` | `true` or `false` | `true` |
+
+### Optional variables
+
+| Variable | Default | Accepted values |
+|---|---|---|
+| `QLTY_ADVISORY_PLUGINS` | _(empty)_ | Comma-separated plugin names kept advisory (e.g. `osv-scanner`) |
+| `QLTY_BLOCK_SMELLS` | `false` | `true` or `false` (promotes smells to blocking in `standard` mode) |
+| `QLTY_ARTIFACT_RETENTION_DAYS` | `7` | Integer `1..90` |
+
+Example bootstrap via GitHub CLI:
+
+```bash
+gh variable set QLTY_SCOPE --repo OWNER/REPO --body "pr"
+gh variable set QLTY_ENFORCEMENT --repo OWNER/REPO --body "standard"
+gh variable set QLTY_VERSION --repo OWNER/REPO --body "0.672.0"
+gh variable set QLTY_POLICY_REF --repo OWNER/REPO --body "qlty-v0.2.0"
+gh variable set QLTY_ENABLE_SMELLS --repo OWNER/REPO --body "true"
+gh variable set QLTY_ENABLE_METRICS --repo OWNER/REPO --body "true"
 ```
 
 ## Gate policy contract

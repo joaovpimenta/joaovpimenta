@@ -3,51 +3,16 @@ name: Quality Gate (Qlty CLI)
 on:
   workflow_call:
     inputs:
-      scope:
-        description: 'Analysis scope: pr (diff vs base ref) or full (entire repository)'
-        required: false
-        default: 'pr'
-        type: string
-      enforcement:
-        description: 'Gate policy: standard (block secrets + error findings), report-only, or strict'
-        required: false
-        default: 'standard'
-        type: string
-      advisory_plugins:
-        description: 'Optional comma-separated plugin names kept advisory (e.g. osv-scanner,zizmor)'
+      scope_override:
+        description: 'Optional manual override for project QLTY_SCOPE (pr or full)'
         required: false
         default: ''
         type: string
-      block_smells:
-        description: 'Promote built-in Qlty maintainability smells to blocking'
+      enforcement_override:
+        description: 'Optional manual override for project QLTY_ENFORCEMENT (report-only, standard, or strict)'
         required: false
-        default: false
-        type: boolean
-      enable_smells:
-        description: 'Run Qlty built-in smells analysis'
-        required: false
-        default: true
-        type: boolean
-      enable_metrics:
-        description: 'Run Qlty complexity metrics report'
-        required: false
-        default: true
-        type: boolean
-      qlty_version:
-        description: 'Pinned Qlty CLI release version without leading v'
-        required: false
-        default: '0.672.0'
+        default: ''
         type: string
-      policy_ref:
-        description: 'Pinned git tag or commit SHA in joaovpimenta/joaovpimenta for gate scripts'
-        required: false
-        default: 'qlty-v0.1.0'
-        type: string
-      artifact_retention_days:
-        description: 'Retention period in days for sanitized quality artifacts'
-        required: false
-        default: 7
-        type: number
 
 permissions:
   contents: read
@@ -59,35 +24,153 @@ jobs:
     timeout-minutes: 15
     env:
       QLTY_TELEMETRY: 'off'
-      QLTY_VERSION: ${{ inputs.qlty_version }}
-      POLICY_REF: ${{ inputs.policy_ref }}
-      QUALITY_SCOPE: ${{ inputs.scope }}
-      QUALITY_ENFORCEMENT: ${{ inputs.enforcement }}
-      QUALITY_ADVISORY_PLUGINS: ${{ inputs.advisory_plugins }}
-      QUALITY_BLOCK_SMELLS: ${{ inputs.block_smells }}
-      QUALITY_SMELLS_ENABLED: ${{ inputs.enable_smells }}
-      QUALITY_METRICS_ENABLED: ${{ inputs.enable_metrics }}
     steps:
-      - name: Validate workflow inputs
+      - name: Validate required project environment variables
+        id: config
         shell: bash
+        env:
+          VAR_QLTY_SCOPE: ${{ vars.QLTY_SCOPE }}
+          VAR_QLTY_ENFORCEMENT: ${{ vars.QLTY_ENFORCEMENT }}
+          VAR_QLTY_VERSION: ${{ vars.QLTY_VERSION }}
+          VAR_QLTY_POLICY_REF: ${{ vars.QLTY_POLICY_REF }}
+          VAR_QLTY_ENABLE_SMELLS: ${{ vars.QLTY_ENABLE_SMELLS }}
+          VAR_QLTY_ENABLE_METRICS: ${{ vars.QLTY_ENABLE_METRICS }}
+          VAR_QLTY_ADVISORY_PLUGINS: ${{ vars.QLTY_ADVISORY_PLUGINS }}
+          VAR_QLTY_BLOCK_SMELLS: ${{ vars.QLTY_BLOCK_SMELLS }}
+          VAR_QLTY_ARTIFACT_RETENTION_DAYS: ${{ vars.QLTY_ARTIFACT_RETENTION_DAYS }}
+          INPUT_SCOPE_OVERRIDE: ${{ inputs.scope_override }}
+          INPUT_ENFORCEMENT_OVERRIDE: ${{ inputs.enforcement_override }}
         run: |
           set -euo pipefail
-          case "$QUALITY_SCOPE" in
-            pr|full) ;;
-            *) echo "Invalid scope: $QUALITY_SCOPE (expected pr or full)" >&2; exit 1 ;;
-          esac
-          case "$QUALITY_ENFORCEMENT" in
-            report-only|standard|strict) ;;
-            *) echo "Invalid enforcement: $QUALITY_ENFORCEMENT (expected report-only, standard, or strict)" >&2; exit 1 ;;
-          esac
-          if [[ ! "$QLTY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid qlty_version: $QLTY_VERSION" >&2
+          trim() {
+            local s="$1"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          scope="$(trim "${VAR_QLTY_SCOPE:-}")"
+          enforcement="$(trim "${VAR_QLTY_ENFORCEMENT:-}")"
+          qlty_version="$(trim "${VAR_QLTY_VERSION:-}")"
+          policy_ref="$(trim "${VAR_QLTY_POLICY_REF:-}")"
+          enable_smells="$(trim "${VAR_QLTY_ENABLE_SMELLS:-}")"
+          enable_metrics="$(trim "${VAR_QLTY_ENABLE_METRICS:-}")"
+          advisory_plugins="$(trim "${VAR_QLTY_ADVISORY_PLUGINS:-}" | tr -d '[:space:]')"
+          block_smells="$(trim "${VAR_QLTY_BLOCK_SMELLS:-}")"
+          retention_days="$(trim "${VAR_QLTY_ARTIFACT_RETENTION_DAYS:-}")"
+          scope_override="$(trim "${INPUT_SCOPE_OVERRIDE:-}")"
+          enforcement_override="$(trim "${INPUT_ENFORCEMENT_OVERRIDE:-}")"
+
+          problems=()
+
+          if [ -z "$scope" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_SCOPE\` (esperado: \`pr\` ou \`full\`).")
+          elif [[ "$scope" != "pr" && "$scope" != "full" ]]; then
+            problems+=("Valor inválido em \`QLTY_SCOPE\`: \`$scope\` (esperado: \`pr\` ou \`full\`).")
+          fi
+
+          if [ -z "$enforcement" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_ENFORCEMENT\` (esperado: \`report-only\`, \`standard\` ou \`strict\`).")
+          elif [[ "$enforcement" != "report-only" && "$enforcement" != "standard" && "$enforcement" != "strict" ]]; then
+            problems+=("Valor inválido em \`QLTY_ENFORCEMENT\`: \`$enforcement\` (esperado: \`report-only\`, \`standard\` ou \`strict\`).")
+          fi
+
+          if [ -z "$qlty_version" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_VERSION\` (esperado: versão SemVer sem \`v\`, ex.: \`0.672.0\`).")
+          elif [[ ! "$qlty_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            problems+=("Valor inválido em \`QLTY_VERSION\`: \`$qlty_version\` (esperado: \`X.Y.Z\`, ex.: \`0.672.0\`).")
+          fi
+
+          if [ -z "$policy_ref" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_POLICY_REF\` (esperado: tag ou SHA em \`joaovpimenta/joaovpimenta\`, ex.: \`qlty-v0.2.0\`).")
+          elif [[ ! "$policy_ref" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            problems+=("Valor inválido em \`QLTY_POLICY_REF\`: \`$policy_ref\`.")
+          fi
+
+          if [ -z "$enable_smells" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_ENABLE_SMELLS\` (esperado: \`true\` ou \`false\`).")
+          elif [[ "$enable_smells" != "true" && "$enable_smells" != "false" ]]; then
+            problems+=("Valor inválido em \`QLTY_ENABLE_SMELLS\`: \`$enable_smells\` (esperado: \`true\` ou \`false\`).")
+          fi
+
+          if [ -z "$enable_metrics" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_ENABLE_METRICS\` (esperado: \`true\` ou \`false\`).")
+          elif [[ "$enable_metrics" != "true" && "$enable_metrics" != "false" ]]; then
+            problems+=("Valor inválido em \`QLTY_ENABLE_METRICS\`: \`$enable_metrics\` (esperado: \`true\` ou \`false\`).")
+          fi
+
+          if [ -z "$block_smells" ]; then
+            block_smells="false"
+          elif [[ "$block_smells" != "true" && "$block_smells" != "false" ]]; then
+            problems+=("Valor inválido em \`QLTY_BLOCK_SMELLS\`: \`$block_smells\` (esperado: \`true\` ou \`false\`).")
+          fi
+
+          if [ -z "$retention_days" ]; then
+            retention_days="7"
+          elif [[ ! "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 1 ] || [ "$retention_days" -gt 90 ]; then
+            problems+=("Valor inválido em \`QLTY_ARTIFACT_RETENTION_DAYS\`: \`$retention_days\` (esperado: inteiro entre \`1\` e \`90\`).")
+          fi
+
+          if [ -n "$advisory_plugins" ] && [[ ! "$advisory_plugins" =~ ^[A-Za-z0-9_,-]+$ ]]; then
+            problems+=("Valor inválido em \`QLTY_ADVISORY_PLUGINS\`: \`$advisory_plugins\` (esperado: lista CSV de plugins).")
+          fi
+
+          if [ -n "$scope_override" ] && [[ "$scope_override" != "pr" && "$scope_override" != "full" ]]; then
+            problems+=("Valor inválido em \`scope_override\`: \`$scope_override\` (esperado: \`pr\` ou \`full\`).")
+          fi
+
+          if [ -n "$enforcement_override" ] && [[ "$enforcement_override" != "report-only" && "$enforcement_override" != "standard" && "$enforcement_override" != "strict" ]]; then
+            problems+=("Valor inválido em \`enforcement_override\`: \`$enforcement_override\` (esperado: \`report-only\`, \`standard\` ou \`strict\`).")
+          fi
+
+          if [ "${#problems[@]}" -gt 0 ]; then
+            justification="A esteira precisa ser corrigida: variáveis de ambiente obrigatórias do Qlty estão ausentes ou inválidas neste repositório."
+            echo "::error title=Esteira precisa ser corrigida::$justification"
+            for problem in "${problems[@]}"; do
+              echo "::error title=Variável obrigatória ausente ou inválida::$problem"
+            done
+            {
+              echo "## Qlty Code Quality Gate — ERRO DE CONFIGURAÇÃO (A esteira precisa ser corrigida)"
+              echo ""
+              echo "$justification"
+              echo ""
+              echo "Configure as variáveis do projeto em **Settings → Secrets and variables → Actions → Variables** (ou via \`gh variable set\`)."
+              echo ""
+              echo "### Problemas encontrados"
+              echo ""
+              for problem in "${problems[@]}"; do
+                echo "- $problem"
+              done
+              echo ""
+              echo "### Variáveis obrigatórias do projeto"
+              echo ""
+              echo "| Variável | Valores aceitos | Exemplo |"
+              echo "|---|---|---|"
+              echo "| \`QLTY_SCOPE\` | \`pr\` ou \`full\` | \`pr\` |"
+              echo "| \`QLTY_ENFORCEMENT\` | \`report-only\`, \`standard\` ou \`strict\` | \`standard\` |"
+              echo "| \`QLTY_VERSION\` | SemVer sem \`v\` | \`0.672.0\` |"
+              echo "| \`QLTY_POLICY_REF\` | Tag ou SHA em \`joaovpimenta/joaovpimenta\` | \`qlty-v0.2.0\` |"
+              echo "| \`QLTY_ENABLE_SMELLS\` | \`true\` ou \`false\` | \`true\` |"
+              echo "| \`QLTY_ENABLE_METRICS\` | \`true\` ou \`false\` | \`true\` |"
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if [[ ! "$POLICY_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-            echo "Invalid policy_ref: $POLICY_REF" >&2
-            exit 1
-          fi
+
+          effective_scope="${scope_override:-$scope}"
+          effective_enforcement="${enforcement_override:-$enforcement}"
+
+          {
+            echo "scope=$effective_scope"
+            echo "enforcement=$effective_enforcement"
+            echo "qlty_version=$qlty_version"
+            echo "policy_ref=$policy_ref"
+            echo "enable_smells=$enable_smells"
+            echo "enable_metrics=$enable_metrics"
+            echo "advisory_plugins=$advisory_plugins"
+            echo "block_smells=$block_smells"
+            echo "artifact_retention_days=$retention_days"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout target repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -100,7 +183,14 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -f ".qlty/qlty.toml" ]; then
-            echo "Missing .qlty/qlty.toml in target repository." >&2
+            msg="A esteira precisa ser corrigida: arquivo obrigatório .qlty/qlty.toml ausente neste repositório."
+            echo "::error title=Esteira precisa ser corrigida::$msg"
+            {
+              echo "## Qlty Code Quality Gate — ERRO DE CONFIGURAÇÃO (A esteira precisa ser corrigida)"
+              echo ""
+              echo "$msg"
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
@@ -110,14 +200,15 @@ jobs:
           path: |
             ~/.qlty/cache
             ~/.cache/qlty
-          key: qlty-${{ runner.os }}-${{ inputs.qlty_version }}-${{ hashFiles('.qlty/qlty.toml') }}
+          key: qlty-${{ runner.os }}-${{ steps.config.outputs.qlty_version }}-${{ hashFiles('.qlty/qlty.toml') }}
           restore-keys: |
-            qlty-${{ runner.os }}-${{ inputs.qlty_version }}-
+            qlty-${{ runner.os }}-${{ steps.config.outputs.qlty_version }}-
 
       - name: Install and verify pinned Qlty CLI
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          QLTY_VERSION: ${{ steps.config.outputs.qlty_version }}
         run: |
           set -euo pipefail
           work_dir="$RUNNER_TEMP/qlty-install"
@@ -149,6 +240,8 @@ jobs:
 
       - name: Fetch pinned gate evaluator from control plane
         shell: bash
+        env:
+          POLICY_REF: ${{ steps.config.outputs.policy_ref }}
         run: |
           set -euo pipefail
           ctrl_dir="$RUNNER_TEMP/quality-control-plane"
@@ -163,6 +256,7 @@ jobs:
         id: base
         shell: bash
         env:
+          QUALITY_SCOPE: ${{ steps.config.outputs.scope }}
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -194,6 +288,8 @@ jobs:
         env:
           EFFECTIVE_SCOPE: ${{ steps.base.outputs.effective_scope }}
           BASE_REF: ${{ steps.base.outputs.base_ref }}
+          QUALITY_SMELLS_ENABLED: ${{ steps.config.outputs.enable_smells }}
+          QUALITY_METRICS_ENABLED: ${{ steps.config.outputs.enable_metrics }}
         run: |
           set -euo pipefail
           raw_dir="$RUNNER_TEMP/quality-raw"
@@ -277,6 +373,11 @@ jobs:
         shell: bash
         env:
           QUALITY_SCOPE: ${{ steps.base.outputs.effective_scope }}
+          QUALITY_ENFORCEMENT: ${{ steps.config.outputs.enforcement }}
+          QUALITY_ADVISORY_PLUGINS: ${{ steps.config.outputs.advisory_plugins }}
+          QUALITY_BLOCK_SMELLS: ${{ steps.config.outputs.block_smells }}
+          QUALITY_SMELLS_ENABLED: ${{ steps.config.outputs.enable_smells }}
+          QUALITY_METRICS_ENABLED: ${{ steps.config.outputs.enable_metrics }}
           QUALITY_BASE_REF: ${{ steps.base.outputs.base_ref }}
           QUALITY_QLTY_VERSION: ${{ steps.run_qlty.outputs.qlty_version }}
           QUALITY_CONFIG_VALIDATE_EXIT: ${{ steps.run_qlty.outputs.config_exit }}
@@ -294,10 +395,10 @@ jobs:
           node "$RUNNER_TEMP/quality-control-plane/scripts/quality-gate.mjs"
 
       - name: Upload sanitized quality artifacts
-        if: always()
+        if: always() && steps.config.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: qlty-quality-report
           path: ${{ runner.temp }}/quality-artifacts
           if-no-files-found: ignore
-          retention-days: ${{ inputs.artifact_retention_days }}
+          retention-days: ${{ fromJSON(steps.config.outputs.artifact_retention_days) }}
