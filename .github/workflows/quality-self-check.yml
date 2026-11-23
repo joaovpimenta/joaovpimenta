@@ -1,0 +1,103 @@
+name: Quality Control Plane Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'source.toml'
+      - 'scripts/quality-gate*.mjs'
+      - '.github/workflows/quality*.yml'
+      - 'governance/defaults/quality-caller.yml'
+  pull_request:
+    paths:
+      - 'source.toml'
+      - 'scripts/quality-gate*.mjs'
+      - '.github/workflows/quality*.yml'
+      - 'governance/defaults/quality-caller.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate-control-plane
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      QLTY_TELEMETRY: 'off'
+      QLTY_VERSION: '0.672.0'
+    steps:
+      - name: Checkout control plane
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run quality gate unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test scripts/quality-gate.test.mjs
+
+      - name: Install and verify pinned Qlty CLI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work_dir="$RUNNER_TEMP/qlty-install"
+          mkdir -p "$work_dir" "$RUNNER_TEMP/qlty-bin"
+          archive="$work_dir/qlty-x86_64-unknown-linux-gnu.tar.xz"
+          sha_file="$archive.sha256"
+          base_url="https://github.com/qltysh/qlty/releases/download/v${QLTY_VERSION}"
+
+          curl -fsSL "$base_url/qlty-x86_64-unknown-linux-gnu.tar.xz" -o "$archive"
+          curl -fsSL "$base_url/qlty-x86_64-unknown-linux-gnu.tar.xz.sha256" -o "$sha_file"
+          expected_sha="$(awk '{print $1}' "$sha_file")"
+          actual_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          test "$expected_sha" = "$actual_sha"
+          gh attestation verify "$archive" --repo qltysh/qlty
+          tar -xJf "$archive" -C "$work_dir"
+          cp "$(find "$work_dir" -type f -name qlty | head -n 1)" "$RUNNER_TEMP/qlty-bin/qlty"
+          chmod +x "$RUNNER_TEMP/qlty-bin/qlty"
+          echo "$RUNNER_TEMP/qlty-bin" >> "$GITHUB_PATH"
+
+      - name: Validate source.toml with multi-language fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctrl="$GITHUB_WORKSPACE"
+          for fx in ts py-java; do
+            dir="$RUNNER_TEMP/fixture-$fx"
+            mkdir -p "$dir/.qlty"
+            git -C "$dir" init -q
+            if [ "$fx" = "ts" ]; then
+              printf '%s\n' \
+                'config_version = "0"' \
+                '[[source]]' \
+                'name = "default"' \
+                'default = true' \
+                '[[source]]' \
+                'name = "personal-quality-policy"' \
+                "directory = \"$ctrl\"" \
+                '[[plugin]]' \
+                'name = "actionlint"' \
+                'version = "1.7.9"' > "$dir/.qlty/qlty.toml"
+            else
+              printf '%s\n' \
+                'config_version = "0"' \
+                '[[source]]' \
+                'name = "default"' \
+                'default = true' \
+                '[[source]]' \
+                'name = "personal-quality-policy"' \
+                "directory = \"$ctrl\"" \
+                '[smells.nested_control_flow]' \
+                'threshold = 4' \
+                '[[plugin]]' \
+                'name = "ruff"' \
+                '[[plugin]]' \
+                'name = "checkstyle"' > "$dir/.qlty/qlty.toml"
+            fi
+            (cd "$dir" && qlty config validate --no-upgrade-check)
+          done

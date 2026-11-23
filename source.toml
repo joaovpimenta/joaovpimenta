@@ -1,0 +1,106 @@
+# Shared Qlty CLI analysis policy for joaovpimenta repositories.
+# Referenced by participating repos via .qlty/qlty.toml:
+#
+#   [[source]]
+#   name = "personal-quality-policy"
+#   repository = "https://github.com/joaovpimenta/joaovpimenta.git"
+#   tag = "qlty-v0.1.0"
+#
+# Local .qlty/qlty.toml settings take precedence over this shared source.
+
+config_version = "0"
+
+# Generated outputs, dependency trees, build/cache artifacts, and vendored code.
+# Application and test sources remain eligible for linting and security analysis.
+exclude_patterns = [
+  "*_min.*",
+  "*-min.*",
+  "*.min.*",
+  "**/.gradle/**",
+  "**/.next/**",
+  "**/.nuxt/**",
+  "**/.svelte-kit/**",
+  "**/.turbo/**",
+  "**/.venv/**",
+  "**/.yarn/**",
+  "**/*.d.ts",
+  "**/__pycache__/**",
+  "**/bower_components/**",
+  "**/build/**",
+  "**/bundle-report/**",
+  "**/cache/**",
+  "**/coverage/**",
+  "**/deps/**",
+  "**/dist/**",
+  "**/extern/**",
+  "**/external/**",
+  "**/generated/**",
+  "**/Godeps/**",
+  "**/gradlew/**",
+  "**/mvnw/**",
+  "**/node_modules/**",
+  "**/out/**",
+  "**/playwright-report/**",
+  "**/protos/**",
+  "**/target/**",
+  "**/test-results/**",
+  "**/testdata/**",
+  "**/vendor/**",
+  "**/venv/**",
+]
+
+test_patterns = [
+  "**/test/**",
+  "**/tests/**",
+  "**/spec/**",
+  "**/__tests__/**",
+  "**/*.test.*",
+  "**/*.spec.*",
+  "**/*_test.*",
+  "**/*_spec.*",
+  "**/test_*.*",
+  "**/spec_*.*",
+  "**/src/test/**",
+  "**/src/androidTest/**",
+]
+
+# Built-in maintainability code smells.
+# Starts in advisory mode ("comment"); individual thresholds are tuned per baseline.
+# Note: function_complexity measures cognitive complexity (not McCabe cyclomatic complexity).
+[smells]
+mode = "comment"
+
+[smells.boolean_logic]
+enabled = true
+threshold = 5
+
+[smells.nested_control_flow]
+enabled = true
+threshold = 3
+
+[smells.function_parameters]
+enabled = true
+threshold = 5
+
+[smells.return_statements]
+enabled = true
+threshold = 6
+
+[smells.file_complexity]
+enabled = true
+threshold = 50
+
+[smells.function_complexity]
+enabled = true
+threshold = 15
+
+[smells.identical_code]
+enabled = true
+threshold = 12
+
+[smells.similar_code]
+enabled = true
+threshold = 12
+
+[smells.duplication]
+nodes_threshold = 50

@@ -1,0 +1,303 @@
+name: Quality Gate (Qlty CLI)
+
+on:
+  workflow_call:
+    inputs:
+      scope:
+        description: 'Analysis scope: pr (diff vs base ref) or full (entire repository)'
+        required: false
+        default: 'pr'
+        type: string
+      enforcement:
+        description: 'Gate policy: standard (block secrets + error findings), report-only, or strict'
+        required: false
+        default: 'standard'
+        type: string
+      advisory_plugins:
+        description: 'Optional comma-separated plugin names kept advisory (e.g. osv-scanner,zizmor)'
+        required: false
+        default: ''
+        type: string
+      block_smells:
+        description: 'Promote built-in Qlty maintainability smells to blocking'
+        required: false
+        default: false
+        type: boolean
+      enable_smells:
+        description: 'Run Qlty built-in smells analysis'
+        required: false
+        default: true
+        type: boolean
+      enable_metrics:
+        description: 'Run Qlty complexity metrics report'
+        required: false
+        default: true
+        type: boolean
+      qlty_version:
+        description: 'Pinned Qlty CLI release version without leading v'
+        required: false
+        default: '0.672.0'
+        type: string
+      policy_ref:
+        description: 'Pinned git tag or commit SHA in joaovpimenta/joaovpimenta for gate scripts'
+        required: false
+        default: 'qlty-v0.1.0'
+        type: string
+      artifact_retention_days:
+        description: 'Retention period in days for sanitized quality artifacts'
+        required: false
+        default: 7
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  qlty:
+    name: qlty-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      QLTY_TELEMETRY: 'off'
+      QLTY_VERSION: ${{ inputs.qlty_version }}
+      POLICY_REF: ${{ inputs.policy_ref }}
+      QUALITY_SCOPE: ${{ inputs.scope }}
+      QUALITY_ENFORCEMENT: ${{ inputs.enforcement }}
+      QUALITY_ADVISORY_PLUGINS: ${{ inputs.advisory_plugins }}
+      QUALITY_BLOCK_SMELLS: ${{ inputs.block_smells }}
+      QUALITY_SMELLS_ENABLED: ${{ inputs.enable_smells }}
+      QUALITY_METRICS_ENABLED: ${{ inputs.enable_metrics }}
+    steps:
+      - name: Validate workflow inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$QUALITY_SCOPE" in
+            pr|full) ;;
+            *) echo "Invalid scope: $QUALITY_SCOPE (expected pr or full)" >&2; exit 1 ;;
+          esac
+          case "$QUALITY_ENFORCEMENT" in
+            report-only|standard|strict) ;;
+            *) echo "Invalid enforcement: $QUALITY_ENFORCEMENT (expected report-only, standard, or strict)" >&2; exit 1 ;;
+          esac
+          if [[ ! "$QLTY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid qlty_version: $QLTY_VERSION" >&2
+            exit 1
+          fi
+          if [[ ! "$POLICY_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "Invalid policy_ref: $POLICY_REF" >&2
+            exit 1
+          fi
+
+      - name: Checkout target repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify .qlty/qlty.toml exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f ".qlty/qlty.toml" ]; then
+            echo "Missing .qlty/qlty.toml in target repository." >&2
+            exit 1
+          fi
+
+      - name: Cache Qlty plugins and sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.qlty/cache
+            ~/.cache/qlty
+          key: qlty-${{ runner.os }}-${{ inputs.qlty_version }}-${{ hashFiles('.qlty/qlty.toml') }}
+          restore-keys: |
+            qlty-${{ runner.os }}-${{ inputs.qlty_version }}-
+
+      - name: Install and verify pinned Qlty CLI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work_dir="$RUNNER_TEMP/qlty-install"
+          mkdir -p "$work_dir" "$RUNNER_TEMP/qlty-bin"
+          archive="$work_dir/qlty-x86_64-unknown-linux-gnu.tar.xz"
+          sha_file="$archive.sha256"
+          base_url="https://github.com/qltysh/qlty/releases/download/v${QLTY_VERSION}"
+
+          curl -fsSL "$base_url/qlty-x86_64-unknown-linux-gnu.tar.xz" -o "$archive"
+          curl -fsSL "$base_url/qlty-x86_64-unknown-linux-gnu.tar.xz.sha256" -o "$sha_file"
+
+          expected_sha="$(awk '{print $1}' "$sha_file")"
+          actual_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          if [ "$expected_sha" != "$actual_sha" ]; then
+            echo "SHA-256 mismatch for Qlty CLI v${QLTY_VERSION}" >&2
+            exit 1
+          fi
+
+          gh attestation verify "$archive" --repo qltysh/qlty
+          tar -xJf "$archive" -C "$work_dir"
+          qlty_bin="$(find "$work_dir" -type f -name qlty | head -n 1)"
+          if [ -z "$qlty_bin" ]; then
+            echo "Could not locate qlty binary in archive." >&2
+            exit 1
+          fi
+          chmod +x "$qlty_bin"
+          cp "$qlty_bin" "$RUNNER_TEMP/qlty-bin/qlty"
+          echo "$RUNNER_TEMP/qlty-bin" >> "$GITHUB_PATH"
+
+      - name: Fetch pinned gate evaluator from control plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctrl_dir="$RUNNER_TEMP/quality-control-plane"
+          rm -rf "$ctrl_dir"
+          git clone --depth 1 --branch "$POLICY_REF" https://github.com/joaovpimenta/joaovpimenta.git "$ctrl_dir"
+          if [ ! -f "$ctrl_dir/scripts/quality-gate.mjs" ]; then
+            echo "Missing scripts/quality-gate.mjs in control plane ref $POLICY_REF." >&2
+            exit 1
+          fi
+
+      - name: Resolve dynamic base ref
+        id: base
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          effective_scope="$QUALITY_SCOPE"
+          base_ref=""
+
+          if [ "$QUALITY_SCOPE" = "pr" ]; then
+            if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_BASE_SHA" ]; then
+              if ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+                git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" || git fetch --no-tags origin "$PR_BASE_REF"
+              fi
+              base_ref="$PR_BASE_SHA"
+            elif [ "$EVENT_NAME" = "push" ] && [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+              base_ref="$PUSH_BEFORE"
+            else
+              effective_scope="full"
+            fi
+          fi
+
+          echo "effective_scope=$effective_scope" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$base_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Run Qlty analysis
+        id: run_qlty
+        shell: bash
+        env:
+          EFFECTIVE_SCOPE: ${{ steps.base.outputs.effective_scope }}
+          BASE_REF: ${{ steps.base.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          raw_dir="$RUNNER_TEMP/quality-raw"
+          art_dir="$RUNNER_TEMP/quality-artifacts"
+          mkdir -p "$raw_dir" "$art_dir"
+
+          version_line="$(qlty version --no-upgrade-check | head -n 1)"
+          echo "qlty_version=$version_line" >> "$GITHUB_OUTPUT"
+          echo "Installed: $version_line"
+
+          qlty sources fetch --no-upgrade-check
+
+          set +e
+          qlty config validate --no-upgrade-check
+          config_exit=$?
+          set -e
+          echo "config_exit=$config_exit" >> "$GITHUB_OUTPUT"
+
+          if [ "$config_exit" -ne 0 ]; then
+            echo "check_exit=2" >> "$GITHUB_OUTPUT"
+            echo "smells_exit=2" >> "$GITHUB_OUTPUT"
+            echo "metrics_exit=2" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          check_args=(check --no-fix --no-progress --print-errors --no-upgrade-check --trigger build --sarif)
+          smells_args=(smells --no-snippets --no-upgrade-check --sarif)
+          metrics_args=(metrics --functions --exclude-tests --no-upgrade-check)
+          metrics_dir_args=(metrics --max-depth 2 --exclude-tests --no-upgrade-check)
+
+          if [ "$EFFECTIVE_SCOPE" = "pr" ] && [ -n "$BASE_REF" ]; then
+            check_args+=(--upstream "$BASE_REF")
+            smells_args+=(--upstream "$BASE_REF")
+            metrics_args+=(--upstream "$BASE_REF")
+            metrics_dir_args+=(--upstream "$BASE_REF")
+          else
+            check_args+=(--all)
+            smells_args+=(--all)
+            metrics_args+=(--all)
+            metrics_dir_args+=(--all)
+          fi
+
+          set +e
+          qlty "${check_args[@]}" > "$raw_dir/check.sarif" 2> "$raw_dir/check.stderr"
+          check_exit=$?
+          set -e
+          echo "check_exit=$check_exit" >> "$GITHUB_OUTPUT"
+          if [ "$check_exit" -ne 0 ] && [ "$check_exit" -ne 1 ]; then
+            echo "qlty check exited unexpectedly with code $check_exit" >&2
+            tail -n 40 "$raw_dir/check.stderr" >&2 || true
+          fi
+
+          smells_exit=0
+          if [ "$QUALITY_SMELLS_ENABLED" = "true" ]; then
+            set +e
+            qlty "${smells_args[@]}" > "$raw_dir/smells.sarif" 2> "$raw_dir/smells.stderr"
+            smells_exit=$?
+            set -e
+            if [ "$smells_exit" -ne 0 ] && [ "$smells_exit" -ne 1 ]; then
+              echo "qlty smells exited unexpectedly with code $smells_exit" >&2
+              tail -n 40 "$raw_dir/smells.stderr" >&2 || true
+            fi
+          fi
+          echo "smells_exit=$smells_exit" >> "$GITHUB_OUTPUT"
+
+          metrics_exit=0
+          if [ "$QUALITY_METRICS_ENABLED" = "true" ]; then
+            set +e
+            qlty "${metrics_args[@]}" > "$raw_dir/metrics-functions.txt" 2> "$raw_dir/metrics.stderr"
+            metrics_exit=$?
+            if [ "$metrics_exit" -eq 0 ]; then
+              qlty "${metrics_dir_args[@]}" > "$art_dir/qlty-metrics-dirs.txt" 2>> "$raw_dir/metrics.stderr" || true
+              cp "$raw_dir/metrics-functions.txt" "$art_dir/qlty-metrics-functions.txt"
+            fi
+            set -e
+          fi
+          echo "metrics_exit=$metrics_exit" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate quality gate and publish summary
+        id: gate
+        shell: bash
+        env:
+          QUALITY_SCOPE: ${{ steps.base.outputs.effective_scope }}
+          QUALITY_BASE_REF: ${{ steps.base.outputs.base_ref }}
+          QUALITY_QLTY_VERSION: ${{ steps.run_qlty.outputs.qlty_version }}
+          QUALITY_CONFIG_VALIDATE_EXIT: ${{ steps.run_qlty.outputs.config_exit }}
+          QUALITY_CHECK_EXIT: ${{ steps.run_qlty.outputs.check_exit }}
+          QUALITY_CHECK_SARIF: ${{ runner.temp }}/quality-raw/check.sarif
+          QUALITY_SMELLS_EXIT: ${{ steps.run_qlty.outputs.smells_exit }}
+          QUALITY_SMELLS_SARIF: ${{ runner.temp }}/quality-raw/smells.sarif
+          QUALITY_METRICS_EXIT: ${{ steps.run_qlty.outputs.metrics_exit }}
+          QUALITY_METRICS_FILE: ${{ runner.temp }}/quality-raw/metrics-functions.txt
+          QUALITY_REPORT_PATH: ${{ runner.temp }}/quality-artifacts/gate-summary.json
+          QUALITY_SANITIZED_CHECK_SARIF: ${{ runner.temp }}/quality-artifacts/qlty-check.sarif
+          QUALITY_SANITIZED_SMELLS_SARIF: ${{ runner.temp }}/quality-artifacts/qlty-smells.sarif
+        run: |
+          set -euo pipefail
+          node "$RUNNER_TEMP/quality-control-plane/scripts/quality-gate.mjs"
+
+      - name: Upload sanitized quality artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: qlty-quality-report
+          path: ${{ runner.temp }}/quality-artifacts
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.artifact_retention_days }}

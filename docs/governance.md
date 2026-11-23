@@ -13,7 +13,8 @@ The controller repository owns:
 - the reusable issue-event workflow;
 - the central repository reconciler;
 - the Project metadata reconciler;
-- the scheduled sync and historical retrofit entry point.
+- the scheduled sync and historical retrofit entry point;
+- the shared Qlty CLI code quality policy (`source.toml`), reusable quality workflow (`.github/workflows/quality.yml`), and gate documentation (`docs/quality-ci.md`).
 
 No repository names are registered manually. Repositories are discovered dynamically from the token.
 

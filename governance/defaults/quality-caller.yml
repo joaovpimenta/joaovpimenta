@@ -1,0 +1,41 @@
+# Reference thin caller template for participating repositories.
+# Opt-in per repository (not auto-installed globally without rollout approval).
+name: Quality
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'Analysis scope (pr or full)'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - pr
+          - full
+      enforcement:
+        description: 'Gate enforcement level'
+        required: false
+        default: 'standard'
+        type: choice
+        options:
+          - report-only
+          - standard
+          - strict
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: joaovpimenta/joaovpimenta/.github/workflows/quality.yml@qlty-v0.1.0
+    with:
+      scope: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || 'pr' }}
+      enforcement: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement || 'standard' }}
+      qlty_version: '0.672.0'
+      policy_ref: 'qlty-v0.1.0'
