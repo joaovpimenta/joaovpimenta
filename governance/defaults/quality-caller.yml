@@ -12,21 +12,21 @@ on:
   workflow_dispatch:
     inputs:
       scope_override:
-        description: 'Optional manual override for QLTY_SCOPE (pr or full)'
+        description: 'Optional manual override for QLTY_SCOPE'
         required: false
-        default: ''
+        default: 'project-default'
         type: choice
         options:
-          - ''
+          - project-default
           - pr
           - full
       enforcement_override:
         description: 'Optional manual override for QLTY_ENFORCEMENT'
         required: false
-        default: ''
+        default: 'project-default'
         type: choice
         options:
-          - ''
+          - project-default
           - report-only
           - standard
           - strict
@@ -42,5 +42,5 @@ jobs:
   quality:
     uses: joaovpimenta/joaovpimenta/.github/workflows/quality.yml@qlty-v0.2.0
     with:
-      scope_override: ${{ github.event_name == 'workflow_dispatch' && inputs.scope_override || '' }}
-      enforcement_override: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement_override || '' }}
+      scope_override: ${{ github.event_name == 'workflow_dispatch' && inputs.scope_override != 'project-default' && inputs.scope_override || '' }}
+      enforcement_override: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement_override != 'project-default' && inputs.enforcement_override || '' }}
