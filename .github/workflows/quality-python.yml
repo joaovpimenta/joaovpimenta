@@ -1,0 +1,202 @@
+# =============================================================================
+# Quality Gate — Stack PYTHON (pytest + pytest-cov Cobertura XML + JUnit)
+# =============================================================================
+# Executa testes Python com pytest + cobertura Cobertura XML + JUnit XML e
+# encadeia o gate universal `./.github/workflows/quality.yml`.
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OBRIGATÓRIAS DESTA STACK (Settings -> Actions -> Variables)
+# -----------------------------------------------------------------------------
+#   QLTY_PYTHON_VERSION      : Versão do Python (ex.: '3.12' ou '3.13')
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OPCIONAIS DESTA STACK (AJUSTE CONFORME O PROJETO)
+# -----------------------------------------------------------------------------
+#   QLTY_PYTHON_INSTALL_CMD  : Comando de instalação de dependências
+#                              Default automático: se existir pyproject.toml -> 'pip install -e ".[dev]"' ou 'pip install -r requirements.txt'
+#                              Ex.: 'pip install -r requirements.txt -r requirements-dev.txt pytest pytest-cov'
+#   QLTY_PYTHON_TEST_CMD     : Override do comando de teste + cobertura
+#                              Default: 'pytest --cov=. --cov-report=xml:coverage/coverage.xml --junitxml=coverage/junit.xml'
+#   QLTY_PYTHON_WORKDIR      : Diretório de trabalho em monorepos (default: '.')
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS GERAIS DO GATE (também obrigatórias no repositório)
+# -----------------------------------------------------------------------------
+#   QLTY_SCOPE               : 'pr' | 'full'                          (recomendado: 'pr')
+#   QLTY_ENFORCEMENT         : 'report-only' | 'standard' | 'strict'  (recomendado: 'standard')
+#   QLTY_VERSION             : '0.672.0'
+#   QLTY_POLICY_REF          : 'qlty-v0.3.0'
+#   QLTY_ENABLE_SMELLS       : 'true' | 'false'                       (recomendado: 'true')
+#   QLTY_ENABLE_METRICS      : 'true' | 'false'                       (recomendado: 'true')
+#   QLTY_MAX_CYCLOMATIC      : '1..100' | 'off'                       (recomendado: '10')
+#   QLTY_COVERAGE_MODE       : 'required' | 'none'                    (recomendado: 'required')
+#   QLTY_MIN_COVERAGE_TOTAL  : '0..100'                               (padrão alvo: '90')
+#   QLTY_MIN_COVERAGE_DIFF   : '0..100'                               (padrão alvo: '90')
+#   QLTY_MIN_TESTS           : inteiro >= 1                           (ex.: '1')
+#   Opc.: QLTY_ADVISORY_PLUGINS, QLTY_BLOCK_SMELLS, QLTY_ALLOW_SKIPPED_TESTS,
+#         QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY, QLTY_ARTIFACT_RETENTION_DAYS
+# =============================================================================
+name: Quality Gate — Python
+
+on:
+  workflow_call:
+    inputs:
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE (pr or full)'
+        required: false
+        default: ''
+        type: string
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT (report-only, standard, or strict)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test-python:
+    name: python-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate Python stack environment variables
+        id: stack
+        shell: bash
+        env:
+          VAR_PY_VERSION: ${{ vars.QLTY_PYTHON_VERSION }}
+          VAR_INSTALL_CMD: ${{ vars.QLTY_PYTHON_INSTALL_CMD }}
+          VAR_TEST_CMD: ${{ vars.QLTY_PYTHON_TEST_CMD }}
+          VAR_WORKDIR: ${{ vars.QLTY_PYTHON_WORKDIR }}
+          VAR_RETENTION_DAYS: ${{ vars.QLTY_ARTIFACT_RETENTION_DAYS }}
+        run: |
+          set -euo pipefail
+          trim() {
+            local s="$1"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          py_ver="$(trim "${VAR_PY_VERSION:-}")"
+          install_cmd="$(trim "${VAR_INSTALL_CMD:-}")"
+          test_cmd="$(trim "${VAR_TEST_CMD:-pytest --cov=. --cov-report=xml:coverage/coverage.xml --junitxml=coverage/junit.xml}")"
+          workdir="$(trim "${VAR_WORKDIR:-.}")"
+          retention_days="$(trim "${VAR_RETENTION_DAYS:-7}")"
+
+          problems=()
+          if [ -z "$py_ver" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_PYTHON_VERSION\` (ex.: \`3.12\`).")
+          fi
+          if [[ ! "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 1 ] || [ "$retention_days" -gt 90 ]; then
+            problems+=("Valor inválido em \`QLTY_ARTIFACT_RETENTION_DAYS\`: \`$retention_days\` (esperado: \`1..90\`).")
+          fi
+
+          if [ "${#problems[@]}" -gt 0 ]; then
+            justification="A esteira precisa ser corrigida: variáveis obrigatórias da stack Python (QLTY_PYTHON_*) estão ausentes ou inválidas."
+            echo "::error title=Esteira precisa ser corrigida::$justification"
+            for p in "${problems[@]}"; do
+              echo "::error title=Configuração Python inválida::$p"
+            done
+            {
+              echo "## Quality Gate Python — ERRO DE CONFIGURAÇÃO (A esteira precisa ser corrigida)"
+              echo ""
+              echo "$justification"
+              echo ""
+              for p in "${problems[@]}"; do
+                echo "- $p"
+              done
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          {
+            echo "python_version=$py_ver"
+            echo "install_cmd=$install_cmd"
+            echo "test_cmd=$test_cmd"
+            echo "workdir=$workdir"
+            echo "retention_days=$retention_days"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ steps.stack.outputs.python_version }}
+          cache: pip
+
+      - name: Install Python dependencies
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        env:
+          INSTALL_CMD: ${{ steps.stack.outputs.install_cmd }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INSTALL_CMD" ]; then
+            eval "$INSTALL_CMD"
+          else
+            python -m pip install --upgrade pip
+            if [ -f requirements.txt ]; then
+              pip install -r requirements.txt
+            fi
+            if [ -f requirements-dev.txt ]; then
+              pip install -r requirements-dev.txt
+            fi
+            if [ -f pyproject.toml ]; then
+              pip install -e . || true
+            fi
+            pip install pytest pytest-cov
+          fi
+
+      - name: Run Python tests with coverage and JUnit XML
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p coverage
+          ${{ steps.stack.outputs.test_cmd }}
+
+      - name: Collect Cobertura XML and JUnit XML reports
+        shell: bash
+        env:
+          WORKDIR: ${{ steps.stack.outputs.workdir }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/quality-test-reports"
+          mkdir -p "$out_dir"
+          i=0
+          copy_file() {
+            local src="$1"
+            i=$((i + 1))
+            local bn
+            bn="$(basename "$src")"
+            cp "$src" "$out_dir/${i}-${bn}"
+          }
+          while IFS= read -r -d '' f; do
+            copy_file "$f"
+          done < <(find "$WORKDIR" -maxdepth 3 -type f \( -name 'coverage.xml' -o -name 'cobertura*.xml' -o -name '*junit*.xml' -o -name 'lcov.info' \) -not -path '*/.venv/*' -not -path '*/venv/*' -print0)
+          ls -la "$out_dir"
+
+      - name: Upload standardized test & coverage reports
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quality-test-reports
+          path: ${{ runner.temp }}/quality-test-reports
+          if-no-files-found: ignore
+          retention-days: ${{ fromJSON(steps.stack.outputs.retention_days) }}
+
+  quality:
+    name: quality
+    needs: [test-python]
+    uses: ./.github/workflows/quality.yml
+    with:
+      scope_override: ${{ inputs.scope_override }}
+      enforcement_override: ${{ inputs.enforcement_override }}
+      test_reports_artifact: quality-test-reports
+    permissions:
+      contents: read

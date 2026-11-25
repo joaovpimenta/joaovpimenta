@@ -1,10 +1,37 @@
-# Reference thin caller template for participating repositories.
-# Pipeline behavior is governed strictly by the target repository's GitHub Actions Variables (vars.QLTY_*).
-# Required repository variables:
-#   QLTY_SCOPE, QLTY_ENFORCEMENT, QLTY_VERSION, QLTY_POLICY_REF,
-#   QLTY_ENABLE_SMELLS, QLTY_ENABLE_METRICS
-# Optional repository variables:
-#   QLTY_ADVISORY_PLUGINS, QLTY_BLOCK_SMELLS, QLTY_ARTIFACT_RETENTION_DAYS
+# =============================================================================
+# Caller Universal — Quality Gate (Qlty CLI + Cobertura + Ciclomática)
+# =============================================================================
+# Use este template se o seu repositório já executa testes em outro job e sobe
+# o artifact `quality-test-reports`, OU para repos sem suite (QLTY_COVERAGE_MODE=none).
+# Para rodar testes + gate juntos por stack, prefira os templates em:
+#   governance/defaults/quality-callers/{web,java,android,python,shell-static}.yml
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS DO REPOSITÓRIO (Settings -> Secrets and variables -> Actions -> Variables)
+# Ajuste os valores por repositório conforme o estágio do projeto:
+# -----------------------------------------------------------------------------
+# Obrigatórias em TODOS os repositórios:
+#   gh variable set QLTY_SCOPE               --body "pr"          # Opções: pr | full
+#   gh variable set QLTY_ENFORCEMENT         --body "standard"    # Opções: report-only | standard | strict
+#   gh variable set QLTY_VERSION             --body "0.672.0"     # SemVer do Qlty CLI sem 'v'
+#   gh variable set QLTY_POLICY_REF          --body "qlty-v0.3.0" # Tag ou SHA em joaovpimenta/joaovpimenta
+#   gh variable set QLTY_ENABLE_SMELLS       --body "true"        # Opções: true | false
+#   gh variable set QLTY_ENABLE_METRICS      --body "true"        # Opções: true | false
+#   gh variable set QLTY_MAX_CYCLOMATIC      --body "10"          # Opções: 1..100 (ex.: 10, 15) | off
+#   gh variable set QLTY_COVERAGE_MODE       --body "required"    # Opções: required | none
+#
+# Obrigatórias quando QLTY_COVERAGE_MODE="required":
+#   gh variable set QLTY_MIN_COVERAGE_TOTAL  --body "90"          # Opções: 0..100 (%) — padrão alvo: 90
+#   gh variable set QLTY_MIN_COVERAGE_DIFF   --body "90"          # Opções: 0..100 (%) — código novo: 90
+#   gh variable set QLTY_MIN_TESTS           --body "1"           # Opções: inteiro >= 1 (mínimo de testes)
+#
+# Opcionais (descomente/defina apenas se quiser alterar o default):
+#   gh variable set QLTY_ADVISORY_PLUGINS            --body "osv-scanner" # Default: '' (CSV de plugins advisory)
+#   gh variable set QLTY_BLOCK_SMELLS                --body "true"        # Default: 'false' (bloqueia smells em standard)
+#   gh variable set QLTY_ALLOW_SKIPPED_TESTS         --body "false"       # Default: 'true'  ('false' bloqueia skipped)
+#   gh variable set QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY --body "false"       # Default: 'false' ('true' falha PR só docs)
+#   gh variable set QLTY_ARTIFACT_RETENTION_DAYS     --body "7"           # Default: '7'     (inteiro 1..90)
+# =============================================================================
 name: Quality
 
 on:
@@ -40,7 +67,7 @@ permissions:
 
 jobs:
   quality:
-    uses: joaovpimenta/joaovpimenta/.github/workflows/quality.yml@qlty-v0.2.0
+    uses: joaovpimenta/joaovpimenta/.github/workflows/quality.yml@qlty-v0.3.0
     with:
       scope_override: ${{ github.event_name == 'workflow_dispatch' && inputs.scope_override != 'project-default' && inputs.scope_override || '' }}
       enforcement_override: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement_override != 'project-default' && inputs.enforcement_override || '' }}

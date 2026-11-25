@@ -1,0 +1,77 @@
+# =============================================================================
+# Template Caller — Stack PYTHON (pytest + pytest-cov Cobertura XML + JUnit)
+# =============================================================================
+# Copie para `.github/workflows/quality.yml` no repositório Python alvo.
+#
+# -----------------------------------------------------------------------------
+# 1) VARIÁVEIS DA STACK PYTHON (Settings -> Actions -> Variables)
+# -----------------------------------------------------------------------------
+# Obrigatórias:
+#   gh variable set QLTY_PYTHON_VERSION      --body "3.12" # Ex.: 3.11 | 3.12 | 3.13
+#
+# Opcionais (ajuste conforme o gerenciador de pacotes / estrutura):
+#   gh variable set QLTY_PYTHON_INSTALL_CMD  --body ""     # Default: pip install requirements.txt + pytest pytest-cov
+#   gh variable set QLTY_PYTHON_TEST_CMD     --body "pytest --cov=. --cov-report=xml:coverage/coverage.xml --junitxml=coverage/junit.xml"
+#   gh variable set QLTY_PYTHON_WORKDIR      --body "."    # Default: .
+#
+# -----------------------------------------------------------------------------
+# 2) VARIÁVEIS GERAIS DO GATE (ajuste cobertura / ciclomática por repo!)
+# -----------------------------------------------------------------------------
+#   gh variable set QLTY_SCOPE               --body "pr"          # Opções: pr | full
+#   gh variable set QLTY_ENFORCEMENT         --body "standard"    # Opções: report-only | standard | strict
+#   gh variable set QLTY_VERSION             --body "0.672.0"     # SemVer do Qlty CLI sem 'v'
+#   gh variable set QLTY_POLICY_REF          --body "qlty-v0.3.0" # Tag ou SHA em joaovpimenta/joaovpimenta
+#   gh variable set QLTY_ENABLE_SMELLS       --body "true"        # Opções: true | false
+#   gh variable set QLTY_ENABLE_METRICS      --body "true"        # Opções: true | false
+#   gh variable set QLTY_MAX_CYCLOMATIC      --body "10"          # Opções: 1..100 (ex.: 10, 15) | off
+#   gh variable set QLTY_COVERAGE_MODE       --body "required"    # Opções: required | none
+#   gh variable set QLTY_MIN_COVERAGE_TOTAL  --body "90"          # Opções: 0..100 (%)
+#   gh variable set QLTY_MIN_COVERAGE_DIFF   --body "90"          # Opções: 0..100 (%)
+#   gh variable set QLTY_MIN_TESTS           --body "1"           # Opções: inteiro >= 1
+#
+# Opcionais do gate:
+#   gh variable set QLTY_ADVISORY_PLUGINS            --body "osv-scanner"
+#   gh variable set QLTY_BLOCK_SMELLS                --body "false"
+#   gh variable set QLTY_ALLOW_SKIPPED_TESTS         --body "true"
+#   gh variable set QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY --body "false"
+#   gh variable set QLTY_ARTIFACT_RETENTION_DAYS     --body "7"
+# =============================================================================
+name: Quality (Python)
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE'
+        required: false
+        default: 'project-default'
+        type: choice
+        options:
+          - project-default
+          - pr
+          - full
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT'
+        required: false
+        default: 'project-default'
+        type: choice
+        options:
+          - project-default
+          - report-only
+          - standard
+          - strict
+
+concurrency:
+  group: quality-python-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality-python:
+    uses: joaovpimenta/joaovpimenta/.github/workflows/quality-python.yml@qlty-v0.3.0
+    with:
+      scope_override: ${{ github.event_name == 'workflow_dispatch' && inputs.scope_override != 'project-default' && inputs.scope_override || '' }}
+      enforcement_override: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement_override != 'project-default' && inputs.enforcement_override || '' }}

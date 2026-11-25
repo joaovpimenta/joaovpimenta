@@ -1,0 +1,135 @@
+# =============================================================================
+# Quality Gate — Stack SHELL / STATIC / DOCS (ShellCheck + Bats opcional + Qlty)
+# =============================================================================
+# Indicado para repositórios de scripts Shell (ex.: zorin-agentic), sites
+# estáticos ou repositórios de documentação/templates.
+#
+# - Para repos de docs/estáticos sem testes executáveis:
+#     Configure QLTY_COVERAGE_MODE='none' e deixe QLTY_SHELL_TEST_CMD vazio.
+# - Para repos Shell com suíte Bats (+ kcov opcional):
+#     Configure QLTY_SHELL_TEST_CMD (ex.: 'bats --report-formatter junit --output coverage tests/')
+#     e ajuste QLTY_COVERAGE_MODE='required' (se gerar LCOV/Cobertura) ou 'none'.
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OPCIONAIS DESTA STACK (Settings -> Actions -> Variables)
+# -----------------------------------------------------------------------------
+#   QLTY_SHELL_TEST_CMD      : Comando de testes opcional (default vazio)
+#                              Ex.: 'bats --report-formatter junit --output coverage tests/'
+#   QLTY_SHELL_WORKDIR       : Diretório de trabalho (default: '.')
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS GERAIS DO GATE (obrigatórias no repositório)
+# -----------------------------------------------------------------------------
+#   QLTY_SCOPE               : 'pr' | 'full'                          (recomendado: 'pr')
+#   QLTY_ENFORCEMENT         : 'report-only' | 'standard' | 'strict'  (recomendado: 'standard')
+#   QLTY_VERSION             : '0.672.0'
+#   QLTY_POLICY_REF          : 'qlty-v0.3.0'
+#   QLTY_ENABLE_SMELLS       : 'true' | 'false'                       (recomendado: 'false' p/ docs, 'true' p/ shell)
+#   QLTY_ENABLE_METRICS      : 'true' | 'false'                       (recomendado: 'false' p/ docs)
+#   QLTY_MAX_CYCLOMATIC      : '1..100' | 'off'                       (recomendado: 'off' p/ docs/shell puro)
+#   QLTY_COVERAGE_MODE       : 'none' | 'required'                    (recomendado: 'none' p/ docs/estáticos)
+#   Se QLTY_COVERAGE_MODE='required':
+#     QLTY_MIN_COVERAGE_TOTAL, QLTY_MIN_COVERAGE_DIFF, QLTY_MIN_TESTS
+# =============================================================================
+name: Quality Gate — Shell / Static
+
+on:
+  workflow_call:
+    inputs:
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE (pr or full)'
+        required: false
+        default: ''
+        type: string
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT (report-only, standard, or strict)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test-shell:
+    name: shell-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve Shell/Static stack variables
+        id: stack
+        shell: bash
+        env:
+          VAR_TEST_CMD: ${{ vars.QLTY_SHELL_TEST_CMD }}
+          VAR_WORKDIR: ${{ vars.QLTY_SHELL_WORKDIR }}
+          VAR_RETENTION_DAYS: ${{ vars.QLTY_ARTIFACT_RETENTION_DAYS }}
+        run: |
+          set -euo pipefail
+          trim() {
+            local s="$1"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+          test_cmd="$(trim "${VAR_TEST_CMD:-}")"
+          workdir="$(trim "${VAR_WORKDIR:-.}")"
+          retention_days="$(trim "${VAR_RETENTION_DAYS:-7}")"
+          if [[ ! "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 1 ] || [ "$retention_days" -gt 90 ]; then
+            echo "::error title=Esteira precisa ser corrigida::Valor inválido em QLTY_ARTIFACT_RETENTION_DAYS: $retention_days (esperado: 1..90)."
+            exit 1
+          fi
+          {
+            echo "test_cmd=$test_cmd"
+            echo "workdir=$workdir"
+            echo "retention_days=$retention_days"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        if: steps.stack.outputs.test_cmd != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run optional Shell tests
+        if: steps.stack.outputs.test_cmd != ''
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p coverage
+          ${{ steps.stack.outputs.test_cmd }}
+
+      - name: Collect optional coverage and JUnit reports
+        if: steps.stack.outputs.test_cmd != ''
+        shell: bash
+        env:
+          WORKDIR: ${{ steps.stack.outputs.workdir }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/quality-test-reports"
+          mkdir -p "$out_dir"
+          i=0
+          while IFS= read -r -d '' f; do
+            i=$((i + 1))
+            cp "$f" "$out_dir/${i}-$(basename "$f")"
+          done < <(find "$WORKDIR" -maxdepth 3 -type f \( -name '*.info' -o -name 'cobertura*.xml' -o -name '*junit*.xml' -o -name 'report.xml' \) -print0)
+
+      - name: Upload optional test reports
+        if: steps.stack.outputs.test_cmd != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quality-test-reports
+          path: ${{ runner.temp }}/quality-test-reports
+          if-no-files-found: ignore
+          retention-days: ${{ fromJSON(steps.stack.outputs.retention_days) }}
+
+  quality:
+    name: quality
+    needs: [test-shell]
+    uses: ./.github/workflows/quality.yml
+    with:
+      scope_override: ${{ inputs.scope_override }}
+      enforcement_override: ${{ inputs.enforcement_override }}
+      test_reports_artifact: quality-test-reports
+    permissions:
+      contents: read

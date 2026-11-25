@@ -1,0 +1,69 @@
+# =============================================================================
+# Template Caller — Stack SHELL / STATIC / DOCS
+# =============================================================================
+# Copie para `.github/workflows/quality.yml` em repos Shell (ex.: zorin-agentic),
+# sites estáticos ou documentação/templates.
+#
+# -----------------------------------------------------------------------------
+# 1) VARIÁVEIS DA STACK SHELL / STATIC (Settings -> Actions -> Variables)
+# -----------------------------------------------------------------------------
+# Opcionais:
+#   gh variable set QLTY_SHELL_TEST_CMD      --body ""   # Opcional — ex.: "bats --report-formatter junit --output coverage tests/"
+#   gh variable set QLTY_SHELL_WORKDIR       --body "."  # Default: .
+#
+# -----------------------------------------------------------------------------
+# 2) VARIÁVEIS GERAIS DO GATE (obrigatórias — modo fail-closed)
+# -----------------------------------------------------------------------------
+#   gh variable set QLTY_SCOPE               --body "pr"          # Opções: pr | full
+#   gh variable set QLTY_ENFORCEMENT         --body "standard"    # Opções: report-only | standard | strict
+#   gh variable set QLTY_VERSION             --body "0.672.0"     # SemVer do Qlty CLI sem 'v'
+#   gh variable set QLTY_POLICY_REF          --body "qlty-v0.3.0" # Tag ou SHA em joaovpimenta/joaovpimenta
+#   gh variable set QLTY_ENABLE_SMELLS       --body "false"       # true p/ código | false p/ docs puros
+#   gh variable set QLTY_ENABLE_METRICS      --body "false"       # true p/ código | false p/ docs puros
+#   gh variable set QLTY_MAX_CYCLOMATIC      --body "off"         # 1..100 ou off
+#   gh variable set QLTY_COVERAGE_MODE       --body "none"        # none (docs/shell sem kcov) | required (com cobertura)
+#
+# Se mudar QLTY_COVERAGE_MODE para "required", defina também:
+#   gh variable set QLTY_MIN_COVERAGE_TOTAL  --body "90"          # 0..100 (%)
+#   gh variable set QLTY_MIN_COVERAGE_DIFF   --body "90"          # 0..100 (%)
+#   gh variable set QLTY_MIN_TESTS           --body "1"           # inteiro >= 1
+# =============================================================================
+name: Quality (Shell / Static)
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE'
+        required: false
+        default: 'project-default'
+        type: choice
+        options:
+          - project-default
+          - pr
+          - full
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT'
+        required: false
+        default: 'project-default'
+        type: choice
+        options:
+          - project-default
+          - report-only
+          - standard
+          - strict
+
+concurrency:
+  group: quality-shell-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality-shell:
+    uses: joaovpimenta/joaovpimenta/.github/workflows/quality-shell.yml@qlty-v0.3.0
+    with:
+      scope_override: ${{ github.event_name == 'workflow_dispatch' && inputs.scope_override != 'project-default' && inputs.scope_override || '' }}
+      enforcement_override: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement_override != 'project-default' && inputs.enforcement_override || '' }}

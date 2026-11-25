@@ -1,16 +1,29 @@
-# Multi-Repository Code Quality (Qlty CLI)
+# Multi-Repository Code Quality & Stack Gates (Qlty CLI)
 
-Zero-cost, locally executed static analysis and maintainability governance using **Qlty CLI** and **GitHub Actions** — with no Qlty Cloud account, paid SaaS, paid AI APIs, or continuously running server.
+Zero-cost, locally executed static analysis, cyclomatic complexity, test execution, and coverage governance using **Qlty CLI** and **GitHub Actions** — with no Qlty Cloud account, paid SaaS, paid AI APIs, or continuously running server.
 
 ## Architecture
 
 | Component | Location | Responsibility |
 |---|---|---|
 | Shared policy source | `source.toml` (root of `joaovpimenta/joaovpimenta`) | Shared `exclude_patterns`, `test_patterns`, and built-in code smell thresholds; consumed via pinned Git tags (`qlty-vX.Y.Z`) |
-| Reusable CI workflow | `.github/workflows/quality.yml` | Read-only `workflow_call` runner with pinned action SHAs, Sigstore-verified pinned Qlty CLI, dynamic PR base ref, and sanitized artifacts |
-| Gate evaluator | `scripts/quality-gate.mjs` + `scripts/quality-gate.test.mjs` | Fail-closed SARIF/metrics evaluator, secret/snippet redaction, and GitHub Job Summary generator |
-| Reference caller | `governance/defaults/quality-caller.yml` | Opt-in thin caller template for participating repos |
-| Target repository | `.qlty/qlty.toml` + `.github/workflows/quality.yml` | Declares shared source tag, language-specific plugins, and repo overrides |
+| Universal quality gate | `.github/workflows/quality.yml` | Core `workflow_call` gate: validates `vars.QLTY_*` fail-closed, runs pinned Sigstore-verified Qlty CLI, evaluates static findings + smells + cyclomatic complexity + total/diff coverage + JUnit test counts |
+| Stack reusable gates | `.github/workflows/quality-{web,java,android,python,shell}.yml` | Run native stack tests + export standardized `quality-test-reports` (LCOV / JaCoCo XML / Cobertura XML + JUnit XML), then chain `./.github/workflows/quality.yml` |
+| Gate evaluator | `scripts/quality-gate.mjs` + `scripts/quality-gate.test.mjs` | Zero-dependency Node.js evaluator for SARIF, Qlty metrics, LCOV, JaCoCo XML, Cobertura XML, unified PR diffs, and JUnit XML |
+| Ready-to-copy callers | `governance/defaults/quality-callers/*.yml` & `governance/defaults/quality-caller.yml` | Thin caller templates with full commented variable references and `gh variable set` snippets per stack |
+
+## Stack Gates
+
+| Stack | Reusable workflow | Native coverage formats | Caller template |
+|---|---|---|---|
+| **Web / Node / TS / JS** | `.github/workflows/quality-web.yml@qlty-v0.3.0` | LCOV (`lcov.info`), Cobertura XML + JUnit XML | `governance/defaults/quality-callers/web.yml` |
+| **Java / Spring (Maven & Gradle)** | `.github/workflows/quality-java.yml@qlty-v0.3.0` | JaCoCo XML + Surefire/Gradle JUnit XML | `governance/defaults/quality-callers/java.yml` |
+| **Android (Gradle JVM / Robolectric)** | `.github/workflows/quality-android.yml@qlty-v0.3.0` | JaCoCo XML / Kover XML + JUnit XML | `governance/defaults/quality-callers/android.yml` |
+| **Python (pytest)** | `.github/workflows/quality-python.yml@qlty-v0.3.0` | Cobertura XML + JUnit XML | `governance/defaults/quality-callers/python.yml` |
+| **Shell / Static / Docs** | `.github/workflows/quality-shell.yml@qlty-v0.3.0` | Optional Bats/kcov or `QLTY_COVERAGE_MODE=none` | `governance/defaults/quality-callers/shell-static.yml` |
+| **Universal (bring your own test job)** | `.github/workflows/quality.yml@qlty-v0.3.0` | Downloads `quality-test-reports` artifact | `governance/defaults/quality-caller.yml` |
+
+> **Android note:** `quality-android.yml` runs JVM unit tests (`testDebugUnitTest`) and Robolectric on free `ubuntu-latest` runners. Emulator-based instrumented tests (`connectedAndroidTest`) lack consistent KVM acceleration on standard free runners and should stay in a separate workflow when needed.
 
 ## Zero-cost & licensing posture
 
@@ -19,130 +32,74 @@ Zero-cost, locally executed static analysis and maintainability governance using
 - **Qlty CLI license:** BSL 1.1 (Fair Source) — free for personal, open-source, and internal commercial use; transitions to GPLv3 on December 10, 2028. Versions are explicitly pinned (`0.672.0`) and verified with both SHA-256 and `gh attestation verify --repo qltysh/qlty`.
 - **Analyzers:** Open-source CLIs (ESLint, actionlint, Gitleaks CLI, OSV-Scanner, Ruff, Checkstyle, PMD, ShellCheck, Trivy, etc.).
 
-## Configuration layering and merging
-
-1. Built-in Qlty `default` source supplies analyzer definitions.
-2. `personal-quality-policy` (`https://github.com/joaovpimenta/joaovpimenta.git`, pinned `tag = "qlty-v0.2.0"`) provides shared exclusions, test patterns, and maintainability smell thresholds.
-3. Project `.qlty/qlty.toml` enables only the analyzers relevant to that repository and overrides any threshold or exclusion as needed.
-4. **Per-project GitHub Actions Variables (`vars.QLTY_*`)** govern the CI pipeline behavior for each repository (no silent defaults for required settings). Optional `workflow_dispatch` inputs (`scope_override`, `enforcement_override`) may override scope/enforcement for ad-hoc audits.
-
-Inspect the effective merged configuration in any repository with:
-
-```bash
-QLTY_TELEMETRY=off qlty config validate --no-upgrade-check
-QLTY_TELEMETRY=off qlty config show --no-upgrade-check
-```
-
 ## Per-project environment variables (`vars.QLTY_*`)
 
-The reusable workflow reads `${{ vars.QLTY_* }}` directly from the **caller repository** (`Settings -> Secrets and variables -> Actions -> Variables`).
+All reusable workflows read `${{ vars.QLTY_* }}` directly from the **caller repository** (`Settings -> Secrets and variables -> Actions -> Variables`).
 
-**Fail-closed rule:** if any required variable is missing or invalid (or `.qlty/qlty.toml` is absent), the pipeline fails immediately at step 1 with an explicit `::error::` annotation and Job Summary stating that **a esteira precisa ser corrigida** before running.
+**Fail-closed rule:** if any required variable is missing or invalid, `.qlty/qlty.toml` is absent, or `QLTY_COVERAGE_MODE=required` has no coverage/JUnit report, the pipeline fails immediately with an explicit `::error::` annotation and Job Summary stating **"A esteira precisa ser corrigida"**.
 
-### Required variables
+### Core variables (required in every repository)
 
-| Variable | Accepted values | Example |
+| Variable | Accepted values | Target default |
 |---|---|---|
 | `QLTY_SCOPE` | `pr` or `full` | `pr` |
 | `QLTY_ENFORCEMENT` | `report-only`, `standard`, or `strict` | `standard` |
 | `QLTY_VERSION` | Pinned SemVer without leading `v` | `0.672.0` |
-| `QLTY_POLICY_REF` | Pinned tag or SHA in `joaovpimenta/joaovpimenta` | `qlty-v0.2.0` |
+| `QLTY_POLICY_REF` | Pinned tag or SHA in `joaovpimenta/joaovpimenta` | `qlty-v0.3.0` |
 | `QLTY_ENABLE_SMELLS` | `true` or `false` | `true` |
 | `QLTY_ENABLE_METRICS` | `true` or `false` | `true` |
+| `QLTY_MAX_CYCLOMATIC` | Integer `1..100` or `off` (requires `QLTY_ENABLE_METRICS=true` when numeric) | `10` |
+| `QLTY_COVERAGE_MODE` | `required` or `none` | `required` (`none` for docs/static) |
 
-### Optional variables
+### Coverage & test variables (required when `QLTY_COVERAGE_MODE=required`)
+
+| Variable | Accepted values | Target default |
+|---|---|---|
+| `QLTY_MIN_COVERAGE_TOTAL` | Number `0..100` (%) — customizable per repo (e.g. lower baseline on legacy repos) | `90` |
+| `QLTY_MIN_COVERAGE_DIFF` | Number `0..100` (%) — coverage required on new/modified executable lines in PR | `90` |
+| `QLTY_MIN_TESTS` | Integer `>= 1` — minimum executed tests reported in JUnit XML | `1` |
+
+### Optional core variables
 
 | Variable | Default | Accepted values |
 |---|---|---|
 | `QLTY_ADVISORY_PLUGINS` | _(empty)_ | Comma-separated plugin names kept advisory (e.g. `osv-scanner`) |
-| `QLTY_BLOCK_SMELLS` | `false` | `true` or `false` (promotes smells to blocking in `standard` mode) |
+| `QLTY_BLOCK_SMELLS` | `false` | `true` or `false` (promotes maintainability smells to blocking in `standard` mode) |
+| `QLTY_ALLOW_SKIPPED_TESTS` | `true` | `true` or `false` (`false` blocks skipped tests in JUnit XML) |
+| `QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY` | `false` | `true` or `false` (`true` fails PRs with 0 executable diff lines) |
 | `QLTY_ARTIFACT_RETENTION_DAYS` | `7` | Integer `1..90` |
 
-Example bootstrap via GitHub CLI:
+### Stack-specific variables
 
-```bash
-gh variable set QLTY_SCOPE --repo OWNER/REPO --body "pr"
-gh variable set QLTY_ENFORCEMENT --repo OWNER/REPO --body "standard"
-gh variable set QLTY_VERSION --repo OWNER/REPO --body "0.672.0"
-gh variable set QLTY_POLICY_REF --repo OWNER/REPO --body "qlty-v0.2.0"
-gh variable set QLTY_ENABLE_SMELLS --repo OWNER/REPO --body "true"
-gh variable set QLTY_ENABLE_METRICS --repo OWNER/REPO --body "true"
-```
+- **Web (`quality-web.yml`):**
+  - Required: `QLTY_WEB_NODE_VERSION`, `QLTY_WEB_PACKAGE_MANAGER` (`pnpm`\|`npm`\|`yarn`\|`none`), `QLTY_WEB_TEST_CMD` (when `QLTY_COVERAGE_MODE=required`).
+  - Optional: `QLTY_WEB_PNPM_VERSION`, `QLTY_WEB_INSTALL_CMD`, `QLTY_WEB_LINT_CMD`, `QLTY_WEB_TYPECHECK_CMD`, `QLTY_WEB_BUILD_CMD`, `QLTY_WEB_E2E_CMD`, `QLTY_WEB_COVERAGE_DIR` (`coverage`), `QLTY_WEB_WORKDIR` (`.`).
+- **Java (`quality-java.yml`):**
+  - Required: `QLTY_JAVA_VERSION`, `QLTY_JAVA_BUILD_TOOL` (`maven`\|`gradle`).
+  - Optional: `QLTY_JAVA_DISTRIBUTION` (`temurin`), `QLTY_JAVA_TEST_CMD`, `QLTY_JAVA_WORKDIR` (`.`).
+- **Android (`quality-android.yml`):**
+  - Required: `QLTY_ANDROID_JAVA_VERSION`.
+  - Optional: `QLTY_ANDROID_TEST_TASK` (`testDebugUnitTest`), `QLTY_ANDROID_COVERAGE_TASK` (`jacocoTestReport` or `koverXmlReport`), `QLTY_ANDROID_LINT_TASK`, `QLTY_ANDROID_TEST_CMD`, `QLTY_ANDROID_WORKDIR` (`.`).
+- **Python (`quality-python.yml`):**
+  - Required: `QLTY_PYTHON_VERSION`.
+  - Optional: `QLTY_PYTHON_INSTALL_CMD`, `QLTY_PYTHON_TEST_CMD`, `QLTY_PYTHON_WORKDIR` (`.`).
+- **Shell / Static (`quality-shell.yml`):**
+  - Optional: `QLTY_SHELL_TEST_CMD`, `QLTY_SHELL_WORKDIR` (`.`).
 
 ## Gate policy contract
 
-| Mode | Tool/Config Errors | Exposed Secrets | Blocking Analyzer `error` | Maintainability Smells | `advisory_plugins` |
-|---|---|---|---|---|---|
-| `report-only` | **FAIL (closed)** | Advisory | Advisory | Advisory | Advisory |
-| `standard` (default) | **FAIL (closed)** | **FAIL** | **FAIL** | Advisory (unless `block_smells: true`) | Advisory |
-| `strict` | **FAIL (closed)** | **FAIL** | **FAIL** (and `warning`) | **FAIL** | Advisory |
+| Mode | Tool/Config Errors | Exposed Secrets | Blocking Analyzer `error` | Cyclomatic / Coverage / Min Tests | Maintainability Smells | `advisory_plugins` |
+|---|---|---|---|---|---|---|
+| `report-only` | **FAIL (closed)** | Advisory | Advisory | Advisory | Advisory | Advisory |
+| `standard` | **FAIL (closed)** | **FAIL** | **FAIL** | **FAIL** | Advisory (unless `QLTY_BLOCK_SMELLS=true`) | Advisory |
+| `strict` | **FAIL (closed)** | **FAIL** | **FAIL** (and `warning`) | **FAIL** | **FAIL** | Advisory |
 
-- Existing native checks (`pnpm lint`, `tsc --noEmit`, `vitest`, Maven/Gradle, Playwright) remain authoritative and are never replaced by Qlty.
-- Cyclomatic complexity (max 10 paths/function) is enforced via native language linters (ESLint `complexity`, Checkstyle `CyclomaticComplexity`, Ruff `C901`), separate from Qlty's cognitive complexity smell (`function_complexity`, threshold 15).
 - Secret findings are always redacted in Job Summaries, `gate-summary.json`, and uploaded SARIF artifacts.
+- Old immutable tags (`qlty-v0.1.0`, `qlty-v0.2.0`) remain untouched so existing callers never break unexpectedly when `qlty-v0.3.0` is released.
 
-## Managing plugins, thresholds, and suppressions
+## Upgrading & validating locally
 
-### Enabling or disabling a plugin per repository
-
-Add or remove `[[plugin]]` entries with pinned versions in the repository's `.qlty/qlty.toml`:
-
-```toml
-[[plugin]]
-name = "actionlint"
-version = "1.7.9"
+```bash
+node --test scripts/quality-gate.test.mjs
+QLTY_TELEMETRY=off qlty config validate --no-upgrade-check
 ```
-
-To skip a plugin on specific paths without blanket-excluding security checks:
-
-```toml
-[[exclude]]
-plugins = ["eslint"]
-patterns = ["generated/**"]
-```
-
-### Overriding smell thresholds
-
-Override any shared threshold directly in `.qlty/qlty.toml`:
-
-```toml
-[smells.nested_control_flow]
-threshold = 4
-```
-
-### Targeted suppressions (`[[triage]]` and `qlty-ignore`)
-
-Document rationale and removal criteria for every suppression:
-
-```toml
-# Rationale: legacy parser scheduled for refactor in #123.
-[[triage]]
-match = { plugin = "osv-scanner", path = "pnpm-lock.yaml" }
-set = { mode = "monitor" }
-```
-
-Inline source suppressions use narrow `qlty-ignore` comments with a short justification.
-
-## Upgrading versions safely
-
-1. Update `qlty_version` in `.github/workflows/quality.yml` and `.github/workflows/quality-self-check.yml` after reviewing `qltysh/qlty` release notes and `LICENSE.md`.
-2. Update `source.toml` if changing shared thresholds/exclusions.
-3. Run `node --test scripts/quality-gate.test.mjs` and verify `quality-self-check.yml` passes.
-4. Create a new annotated tag (e.g., `qlty-v0.2.0`) and test it on the pilot repo (`joaovpimenta/are`) before bumping callers in other repos.
-
-## Rollback
-
-- **Per-repository:** revert the caller PR or switch `enforcement: report-only` (or pin back to the previous `qlty-vX.Y.Z` tag).
-- **Control plane:** keep old `qlty-vX.Y.Z` tags immutable; callers pinned to a previous tag are unaffected by newer commits on `main`.
-
-## Pilot baseline (`joaovpimenta/are`, 2026-11-22)
-
-- **Existing checks preserved:** `lint` (ESLint 10 flat config), `typecheck` (`tsc --noEmit`), `unit-tests` (Vitest 5), `build`, `bundle-size`, `interaction-tests`, `smoke-tests` (Playwright), `ci-gate`, `validated-site` → `pages.yml`.
-- **Newly added via Qlty:** `actionlint` (0 findings across 4 workflows), `gitleaks` (offline secret scanning), `osv-scanner` (13 pre-existing lockfile advisories reported as advisory during baseline), built-in smells (53 existing baseline findings across 85 source files with `tests/**` classified as tests: 26 `function-complexity`, 7 `nested-control-flow`, 6 `similar-code`, 5 `return-statements`, 4 `file-complexity`, 2 `boolean-logic`, 2 `identical-code`, 1 `function-parameters`), and complexity metrics (`SequenceInput` cognitive 22 / cyclo 13; `LabHarness` cognitive 19 / cyclo 18).
-- **Pilot PR policy:** `scope: pr`, `enforcement: standard`, `advisory_plugins: osv-scanner`, `block_smells: false` — blocks new workflow syntax errors and exposed secrets while reporting smells and existing dependency debt without breaking deploys.
-
-## Rollout waves (opt-in, approval required per wave)
-
-1. **Wave 0 (Pilot):** `joaovpimenta/are` (TypeScript/React/Three.js monorepo).
-2. **Wave 1 (Cross-stack validation):** 1 Java/Maven repo (e.g. `busca-cnpj-cli`) + 1 mixed JS/Python repo (e.g. `tech-topics` or `azure-ai-200`).
-3. **Wave 2 (Active personal repos):** Small batches by stack; forks remain report-only until maintenance intent is confirmed; archived/non-code repos opt out.

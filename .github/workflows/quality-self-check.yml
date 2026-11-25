@@ -8,12 +8,14 @@ on:
       - 'scripts/quality-gate*.mjs'
       - '.github/workflows/quality*.yml'
       - 'governance/defaults/quality-caller.yml'
+      - 'governance/defaults/quality-callers/*.yml'
   pull_request:
     paths:
       - 'source.toml'
       - 'scripts/quality-gate*.mjs'
       - '.github/workflows/quality*.yml'
       - 'governance/defaults/quality-caller.yml'
+      - 'governance/defaults/quality-callers/*.yml'
   workflow_dispatch:
 
 permissions:

@@ -1,3 +1,44 @@
+# =============================================================================
+# Quality Gate Universal (Qlty CLI + Cobertura + Diff Coverage + Ciclomática)
+# =============================================================================
+# Motor central reutilizável (100% gratuito / FOSS, QLTY_TELEMETRY=off).
+# Governado por GitHub Actions Repository Variables do repositório chamador:
+#   Settings -> Secrets and variables -> Actions -> Variables (ou `gh variable set`)
+#
+# Política FAIL-CLOSED: se qualquer variável obrigatória estiver ausente ou
+# inválida (ou se faltarem relatórios quando QLTY_COVERAGE_MODE=required),
+# a esteira falha imediatamente com "A esteira precisa ser corrigida".
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OBRIGATÓRIAS EM TODOS OS REPOSITÓRIOS
+# -----------------------------------------------------------------------------
+#   QLTY_SCOPE            : 'pr' (somente diff do PR) | 'full' (repo inteiro)
+#   QLTY_ENFORCEMENT      : 'report-only' | 'standard' | 'strict'
+#   QLTY_VERSION          : SemVer do Qlty CLI sem 'v' (ex.: '0.672.0')
+#   QLTY_POLICY_REF       : Tag ou SHA em joaovpimenta/joaovpimenta (ex.: 'qlty-v0.3.0')
+#   QLTY_ENABLE_SMELLS    : 'true' | 'false' (8 code smells de manutenibilidade)
+#   QLTY_ENABLE_METRICS   : 'true' | 'false' (métricas de complexidade por função)
+#   QLTY_MAX_CYCLOMATIC   : Inteiro '1..100' (recomendado: '10' ou '15') | 'off'
+#                           Obs.: exige QLTY_ENABLE_METRICS='true' quando ativo.
+#   QLTY_COVERAGE_MODE    : 'required' (exige cobertura + JUnit) | 'none' (docs/estáticos)
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OBRIGATÓRIAS QUANDO QLTY_COVERAGE_MODE = 'required'
+# -----------------------------------------------------------------------------
+#   QLTY_MIN_COVERAGE_TOTAL : Cobertura geral mínima de linhas 0..100 (padrão alvo: '90')
+#                             Ajuste por repo (ex.: '65' em legado, subindo gradualmente).
+#   QLTY_MIN_COVERAGE_DIFF  : Cobertura mínima em código novo do PR 0..100 (padrão alvo: '90')
+#   QLTY_MIN_TESTS          : Quantidade mínima de testes executados >= 1 (ex.: '1' ou '50')
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OPCIONAIS (COM DEFAULTS SEGUROS — AJUSTE SE PRECISAR)
+# -----------------------------------------------------------------------------
+#   QLTY_ADVISORY_PLUGINS            : CSV de plugins só advisory (default: '', ex.: 'osv-scanner')
+#   QLTY_BLOCK_SMELLS                : 'true' | 'false' (default: 'false'; bloqueia smells em 'standard')
+#   QLTY_ALLOW_SKIPPED_TESTS         : 'true' | 'false' (default: 'true'; 'false' bloqueia skipped)
+#   QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY : 'true' | 'false' (default: 'false'; 'true' falha se PR sem linhas executáveis)
+#   QLTY_ARTIFACT_RETENTION_DAYS     : Inteiro '1..90' (default: '7')
+# =============================================================================
 name: Quality Gate (Qlty CLI)
 
 on:
@@ -12,6 +53,11 @@ on:
         description: 'Optional manual override for project QLTY_ENFORCEMENT (report-only, standard, or strict)'
         required: false
         default: ''
+        type: string
+      test_reports_artifact:
+        description: 'Artifact name containing coverage (LCOV/JaCoCo/Cobertura) and JUnit XML reports'
+        required: false
+        default: 'quality-test-reports'
         type: string
 
 permissions:
@@ -35,11 +81,19 @@ jobs:
           VAR_QLTY_POLICY_REF: ${{ vars.QLTY_POLICY_REF }}
           VAR_QLTY_ENABLE_SMELLS: ${{ vars.QLTY_ENABLE_SMELLS }}
           VAR_QLTY_ENABLE_METRICS: ${{ vars.QLTY_ENABLE_METRICS }}
+          VAR_QLTY_MAX_CYCLOMATIC: ${{ vars.QLTY_MAX_CYCLOMATIC }}
+          VAR_QLTY_COVERAGE_MODE: ${{ vars.QLTY_COVERAGE_MODE }}
+          VAR_QLTY_MIN_COVERAGE_TOTAL: ${{ vars.QLTY_MIN_COVERAGE_TOTAL }}
+          VAR_QLTY_MIN_COVERAGE_DIFF: ${{ vars.QLTY_MIN_COVERAGE_DIFF }}
+          VAR_QLTY_MIN_TESTS: ${{ vars.QLTY_MIN_TESTS }}
           VAR_QLTY_ADVISORY_PLUGINS: ${{ vars.QLTY_ADVISORY_PLUGINS }}
           VAR_QLTY_BLOCK_SMELLS: ${{ vars.QLTY_BLOCK_SMELLS }}
+          VAR_QLTY_ALLOW_SKIPPED_TESTS: ${{ vars.QLTY_ALLOW_SKIPPED_TESTS }}
+          VAR_QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY: ${{ vars.QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY }}
           VAR_QLTY_ARTIFACT_RETENTION_DAYS: ${{ vars.QLTY_ARTIFACT_RETENTION_DAYS }}
           INPUT_SCOPE_OVERRIDE: ${{ inputs.scope_override }}
           INPUT_ENFORCEMENT_OVERRIDE: ${{ inputs.enforcement_override }}
+          INPUT_TEST_REPORTS_ARTIFACT: ${{ inputs.test_reports_artifact }}
         run: |
           set -euo pipefail
           trim() {
@@ -55,12 +109,21 @@ jobs:
           policy_ref="$(trim "${VAR_QLTY_POLICY_REF:-}")"
           enable_smells="$(trim "${VAR_QLTY_ENABLE_SMELLS:-}")"
           enable_metrics="$(trim "${VAR_QLTY_ENABLE_METRICS:-}")"
+          max_cyclomatic="$(trim "${VAR_QLTY_MAX_CYCLOMATIC:-}")"
+          coverage_mode="$(trim "${VAR_QLTY_COVERAGE_MODE:-}")"
+          min_cov_total="$(trim "${VAR_QLTY_MIN_COVERAGE_TOTAL:-}")"
+          min_cov_diff="$(trim "${VAR_QLTY_MIN_COVERAGE_DIFF:-}")"
+          min_tests="$(trim "${VAR_QLTY_MIN_TESTS:-}")"
           advisory_plugins="$(trim "${VAR_QLTY_ADVISORY_PLUGINS:-}" | tr -d '[:space:]')"
           block_smells="$(trim "${VAR_QLTY_BLOCK_SMELLS:-}")"
+          allow_skipped="$(trim "${VAR_QLTY_ALLOW_SKIPPED_TESTS:-}")"
+          diff_fail_on_empty="$(trim "${VAR_QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY:-}")"
           retention_days="$(trim "${VAR_QLTY_ARTIFACT_RETENTION_DAYS:-}")"
           scope_override="$(trim "${INPUT_SCOPE_OVERRIDE:-}")"
           enforcement_override="$(trim "${INPUT_ENFORCEMENT_OVERRIDE:-}")"
+          test_reports_artifact="$(trim "${INPUT_TEST_REPORTS_ARTIFACT:-}")"
 
+          percent_re='^(100(\.0{1,2})?|[0-9]{1,2}(\.[0-9]{1,2})?)$'
           problems=()
 
           if [ -z "$scope" ]; then
@@ -82,7 +145,7 @@ jobs:
           fi
 
           if [ -z "$policy_ref" ]; then
-            problems+=("Variável obrigatória ausente: \`QLTY_POLICY_REF\` (esperado: tag ou SHA em \`joaovpimenta/joaovpimenta\`, ex.: \`qlty-v0.2.0\`).")
+            problems+=("Variável obrigatória ausente: \`QLTY_POLICY_REF\` (esperado: tag ou SHA em \`joaovpimenta/joaovpimenta\`, ex.: \`qlty-v0.3.0\`).")
           elif [[ ! "$policy_ref" =~ ^[A-Za-z0-9._/-]+$ ]]; then
             problems+=("Valor inválido em \`QLTY_POLICY_REF\`: \`$policy_ref\`.")
           fi
@@ -99,10 +162,58 @@ jobs:
             problems+=("Valor inválido em \`QLTY_ENABLE_METRICS\`: \`$enable_metrics\` (esperado: \`true\` ou \`false\`).")
           fi
 
+          if [ -z "$max_cyclomatic" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_MAX_CYCLOMATIC\` (esperado: inteiro \`1..100\` ou \`off\`).")
+          elif [ "$max_cyclomatic" != "off" ]; then
+            if [[ ! "$max_cyclomatic" =~ ^[0-9]+$ ]] || [ "$max_cyclomatic" -lt 1 ] || [ "$max_cyclomatic" -gt 100 ]; then
+              problems+=("Valor inválido em \`QLTY_MAX_CYCLOMATIC\`: \`$max_cyclomatic\` (esperado: inteiro \`1..100\` ou \`off\`).")
+            elif [ "$enable_metrics" = "false" ]; then
+              problems+=("Configuração inconsistente: \`QLTY_MAX_CYCLOMATIC\` ativo exige \`QLTY_ENABLE_METRICS=true\`.")
+            fi
+          fi
+
+          if [ -z "$coverage_mode" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_COVERAGE_MODE\` (esperado: \`required\` ou \`none\`).")
+          elif [[ "$coverage_mode" != "required" && "$coverage_mode" != "none" ]]; then
+            problems+=("Valor inválido em \`QLTY_COVERAGE_MODE\`: \`$coverage_mode\` (esperado: \`required\` ou \`none\`).")
+          fi
+
+          if [ "$coverage_mode" = "required" ]; then
+            if [ -z "$min_cov_total" ]; then
+              problems+=("Variável obrigatória ausente (com \`QLTY_COVERAGE_MODE=required\`): \`QLTY_MIN_COVERAGE_TOTAL\` (esperado: \`0..100\`, ex.: \`90\`).")
+            elif [[ ! "$min_cov_total" =~ $percent_re ]]; then
+              problems+=("Valor inválido em \`QLTY_MIN_COVERAGE_TOTAL\`: \`$min_cov_total\` (esperado: número \`0..100\`).")
+            fi
+
+            if [ -z "$min_cov_diff" ]; then
+              problems+=("Variável obrigatória ausente (com \`QLTY_COVERAGE_MODE=required\`): \`QLTY_MIN_COVERAGE_DIFF\` (esperado: \`0..100\`, ex.: \`90\`).")
+            elif [[ ! "$min_cov_diff" =~ $percent_re ]]; then
+              problems+=("Valor inválido em \`QLTY_MIN_COVERAGE_DIFF\`: \`$min_cov_diff\` (esperado: número \`0..100\`).")
+            fi
+
+            if [ -z "$min_tests" ]; then
+              problems+=("Variável obrigatória ausente (com \`QLTY_COVERAGE_MODE=required\`): \`QLTY_MIN_TESTS\` (esperado: inteiro \`>= 1\`, ex.: \`1\`).")
+            elif [[ ! "$min_tests" =~ ^[0-9]+$ ]] || [ "$min_tests" -lt 1 ]; then
+              problems+=("Valor inválido em \`QLTY_MIN_TESTS\`: \`$min_tests\` (esperado: inteiro \`>= 1\`).")
+            fi
+          fi
+
           if [ -z "$block_smells" ]; then
             block_smells="false"
           elif [[ "$block_smells" != "true" && "$block_smells" != "false" ]]; then
             problems+=("Valor inválido em \`QLTY_BLOCK_SMELLS\`: \`$block_smells\` (esperado: \`true\` ou \`false\`).")
+          fi
+
+          if [ -z "$allow_skipped" ]; then
+            allow_skipped="true"
+          elif [[ "$allow_skipped" != "true" && "$allow_skipped" != "false" ]]; then
+            problems+=("Valor inválido em \`QLTY_ALLOW_SKIPPED_TESTS\`: \`$allow_skipped\` (esperado: \`true\` ou \`false\`).")
+          fi
+
+          if [ -z "$diff_fail_on_empty" ]; then
+            diff_fail_on_empty="false"
+          elif [[ "$diff_fail_on_empty" != "true" && "$diff_fail_on_empty" != "false" ]]; then
+            problems+=("Valor inválido em \`QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY\`: \`$diff_fail_on_empty\` (esperado: \`true\` ou \`false\`).")
           fi
 
           if [ -z "$retention_days" ]; then
@@ -149,9 +260,19 @@ jobs:
               echo "| \`QLTY_SCOPE\` | \`pr\` ou \`full\` | \`pr\` |"
               echo "| \`QLTY_ENFORCEMENT\` | \`report-only\`, \`standard\` ou \`strict\` | \`standard\` |"
               echo "| \`QLTY_VERSION\` | SemVer sem \`v\` | \`0.672.0\` |"
-              echo "| \`QLTY_POLICY_REF\` | Tag ou SHA em \`joaovpimenta/joaovpimenta\` | \`qlty-v0.2.0\` |"
+              echo "| \`QLTY_POLICY_REF\` | Tag ou SHA em \`joaovpimenta/joaovpimenta\` | \`qlty-v0.3.0\` |"
               echo "| \`QLTY_ENABLE_SMELLS\` | \`true\` ou \`false\` | \`true\` |"
               echo "| \`QLTY_ENABLE_METRICS\` | \`true\` ou \`false\` | \`true\` |"
+              echo "| \`QLTY_MAX_CYCLOMATIC\` | Inteiro \`1..100\` ou \`off\` | \`10\` |"
+              echo "| \`QLTY_COVERAGE_MODE\` | \`required\` ou \`none\` | \`required\` |"
+              echo ""
+              echo "### Obrigatórias quando \`QLTY_COVERAGE_MODE=required\`"
+              echo ""
+              echo "| Variável | Valores aceitos | Exemplo |"
+              echo "|---|---|---|"
+              echo "| \`QLTY_MIN_COVERAGE_TOTAL\` | Número \`0..100\` (%) | \`90\` |"
+              echo "| \`QLTY_MIN_COVERAGE_DIFF\` | Número \`0..100\` (%) | \`90\` |"
+              echo "| \`QLTY_MIN_TESTS\` | Inteiro \`>= 1\` | \`1\` |"
               echo ""
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
@@ -167,9 +288,17 @@ jobs:
             echo "policy_ref=$policy_ref"
             echo "enable_smells=$enable_smells"
             echo "enable_metrics=$enable_metrics"
+            echo "max_cyclomatic=$max_cyclomatic"
+            echo "coverage_mode=$coverage_mode"
+            echo "min_coverage_total=$min_cov_total"
+            echo "min_coverage_diff=$min_cov_diff"
+            echo "min_tests=$min_tests"
             echo "advisory_plugins=$advisory_plugins"
             echo "block_smells=$block_smells"
+            echo "allow_skipped_tests=$allow_skipped"
+            echo "diff_fail_on_empty=$diff_fail_on_empty"
             echo "artifact_retention_days=$retention_days"
+            echo "test_reports_artifact=$test_reports_artifact"
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout target repository
@@ -193,6 +322,14 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+
+      - name: Download test & coverage reports artifact
+        if: steps.config.outputs.coverage_mode == 'required' && steps.config.outputs.test_reports_artifact != ''
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ steps.config.outputs.test_reports_artifact }}
+          path: ${{ runner.temp }}/quality-test-reports
 
       - name: Cache Qlty plugins and sources
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -252,7 +389,7 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve dynamic base ref
+      - name: Resolve dynamic base ref and generate PR diff
         id: base
         shell: bash
         env:
@@ -263,6 +400,7 @@ jobs:
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/quality-raw"
           effective_scope="$QUALITY_SCOPE"
           base_ref=""
 
@@ -277,6 +415,11 @@ jobs:
             else
               effective_scope="full"
             fi
+          fi
+
+          if [ "$effective_scope" = "pr" ] && [ -n "$base_ref" ]; then
+            git diff -U0 "${base_ref}...HEAD" > "$RUNNER_TEMP/quality-raw/pr.diff" 2>/dev/null || \
+              git diff -U0 "$base_ref" HEAD > "$RUNNER_TEMP/quality-raw/pr.diff" || true
           fi
 
           echo "effective_scope=$effective_scope" >> "$GITHUB_OUTPUT"
@@ -378,6 +521,16 @@ jobs:
           QUALITY_BLOCK_SMELLS: ${{ steps.config.outputs.block_smells }}
           QUALITY_SMELLS_ENABLED: ${{ steps.config.outputs.enable_smells }}
           QUALITY_METRICS_ENABLED: ${{ steps.config.outputs.enable_metrics }}
+          QUALITY_MAX_CYCLOMATIC: ${{ steps.config.outputs.max_cyclomatic }}
+          QUALITY_COVERAGE_MODE: ${{ steps.config.outputs.coverage_mode }}
+          QUALITY_MIN_COVERAGE_TOTAL: ${{ steps.config.outputs.min_coverage_total }}
+          QUALITY_MIN_COVERAGE_DIFF: ${{ steps.config.outputs.min_coverage_diff }}
+          QUALITY_MIN_TESTS: ${{ steps.config.outputs.min_tests }}
+          QUALITY_ALLOW_SKIPPED_TESTS: ${{ steps.config.outputs.allow_skipped_tests }}
+          QUALITY_COVERAGE_DIFF_FAIL_ON_EMPTY: ${{ steps.config.outputs.diff_fail_on_empty }}
+          QUALITY_WORKSPACE_ROOT: ${{ github.workspace }}
+          QUALITY_TEST_REPORTS_DIR: ${{ runner.temp }}/quality-test-reports
+          QUALITY_DIFF_FILE: ${{ runner.temp }}/quality-raw/pr.diff
           QUALITY_BASE_REF: ${{ steps.base.outputs.base_ref }}
           QUALITY_QLTY_VERSION: ${{ steps.run_qlty.outputs.qlty_version }}
           QUALITY_CONFIG_VALIDATE_EXIT: ${{ steps.run_qlty.outputs.config_exit }}

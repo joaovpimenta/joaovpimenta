@@ -1,0 +1,222 @@
+# =============================================================================
+# Quality Gate — Stack JAVA / Spring Boot (Maven & Gradle + JaCoCo)
+# =============================================================================
+# Executa testes unitários Java (Maven ou Gradle), gera relatório JaCoCo XML
+# + JUnit XML (Surefire / Gradle) e encadeia o gate universal
+# `./.github/workflows/quality.yml` (Qlty + cobertura geral + código novo +
+# quantidade de testes + ciclomática + smells + segredos).
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OBRIGATÓRIAS DESTA STACK (Settings -> Actions -> Variables)
+# -----------------------------------------------------------------------------
+#   QLTY_JAVA_VERSION      : Versão do JDK (ex.: '21', '17', '25')
+#   QLTY_JAVA_BUILD_TOOL   : 'maven' | 'gradle'
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OPCIONAIS DESTA STACK (AJUSTE CONFORME O PROJETO)
+# -----------------------------------------------------------------------------
+#   QLTY_JAVA_DISTRIBUTION : Distribuição JDK (default: 'temurin')
+#                            Opções: 'temurin' | 'zulu' | 'corretto' | 'adopt'
+#   QLTY_JAVA_TEST_CMD     : Override do comando de testes + cobertura JaCoCo
+#                            Defaults:
+#                              maven:  'mvn -B test jacoco:report' (usa ./mvnw se existir)
+#                              gradle: './gradlew test jacocoTestReport --no-daemon'
+#                            Ex. multi-módulo Maven: './mvnw -B verify jacoco:report-aggregate'
+#   QLTY_JAVA_WORKDIR      : Diretório de trabalho em monorepos (default: '.')
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS GERAIS DO GATE (também obrigatórias no repositório)
+# -----------------------------------------------------------------------------
+#   QLTY_SCOPE               : 'pr' | 'full'                          (recomendado: 'pr')
+#   QLTY_ENFORCEMENT         : 'report-only' | 'standard' | 'strict'  (recomendado: 'standard')
+#   QLTY_VERSION             : '0.672.0'
+#   QLTY_POLICY_REF          : 'qlty-v0.3.0'
+#   QLTY_ENABLE_SMELLS       : 'true' | 'false'                       (recomendado: 'true')
+#   QLTY_ENABLE_METRICS      : 'true' | 'false'                       (recomendado: 'true')
+#   QLTY_MAX_CYCLOMATIC      : '1..100' | 'off'                       (recomendado: '10')
+#   QLTY_COVERAGE_MODE       : 'required' | 'none'                    (recomendado: 'required')
+#   QLTY_MIN_COVERAGE_TOTAL  : '0..100'                               (padrão alvo: '90')
+#   QLTY_MIN_COVERAGE_DIFF   : '0..100'                               (padrão alvo: '90')
+#   QLTY_MIN_TESTS           : inteiro >= 1                           (ex.: '1')
+#   Opc.: QLTY_ADVISORY_PLUGINS, QLTY_BLOCK_SMELLS, QLTY_ALLOW_SKIPPED_TESTS,
+#         QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY, QLTY_ARTIFACT_RETENTION_DAYS
+# =============================================================================
+name: Quality Gate — Java
+
+on:
+  workflow_call:
+    inputs:
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE (pr or full)'
+        required: false
+        default: ''
+        type: string
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT (report-only, standard, or strict)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test-java:
+    name: java-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Validate Java stack environment variables
+        id: stack
+        shell: bash
+        env:
+          VAR_JAVA_VERSION: ${{ vars.QLTY_JAVA_VERSION }}
+          VAR_JAVA_DIST: ${{ vars.QLTY_JAVA_DISTRIBUTION }}
+          VAR_BUILD_TOOL: ${{ vars.QLTY_JAVA_BUILD_TOOL }}
+          VAR_TEST_CMD: ${{ vars.QLTY_JAVA_TEST_CMD }}
+          VAR_WORKDIR: ${{ vars.QLTY_JAVA_WORKDIR }}
+          VAR_RETENTION_DAYS: ${{ vars.QLTY_ARTIFACT_RETENTION_DAYS }}
+        run: |
+          set -euo pipefail
+          trim() {
+            local s="$1"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          java_ver="$(trim "${VAR_JAVA_VERSION:-}")"
+          java_dist="$(trim "${VAR_JAVA_DIST:-temurin}")"
+          build_tool="$(trim "${VAR_BUILD_TOOL:-}")"
+          test_cmd="$(trim "${VAR_TEST_CMD:-}")"
+          workdir="$(trim "${VAR_WORKDIR:-.}")"
+          retention_days="$(trim "${VAR_RETENTION_DAYS:-7}")"
+
+          problems=()
+          if [ -z "$java_ver" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_JAVA_VERSION\` (ex.: \`21\` ou \`17\`).")
+          fi
+          if [ -z "$build_tool" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_JAVA_BUILD_TOOL\` (esperado: \`maven\` ou \`gradle\`).")
+          elif [[ "$build_tool" != "maven" && "$build_tool" != "gradle" ]]; then
+            problems+=("Valor inválido em \`QLTY_JAVA_BUILD_TOOL\`: \`$build_tool\` (esperado: \`maven\` ou \`gradle\`).")
+          fi
+          if [[ ! "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 1 ] || [ "$retention_days" -gt 90 ]; then
+            problems+=("Valor inválido em \`QLTY_ARTIFACT_RETENTION_DAYS\`: \`$retention_days\` (esperado: \`1..90\`).")
+          fi
+
+          if [ "${#problems[@]}" -gt 0 ]; then
+            justification="A esteira precisa ser corrigida: variáveis obrigatórias da stack Java (QLTY_JAVA_*) estão ausentes ou inválidas."
+            echo "::error title=Esteira precisa ser corrigida::$justification"
+            for p in "${problems[@]}"; do
+              echo "::error title=Configuração Java inválida::$p"
+            done
+            {
+              echo "## Quality Gate Java — ERRO DE CONFIGURAÇÃO (A esteira precisa ser corrigida)"
+              echo ""
+              echo "$justification"
+              echo ""
+              for p in "${problems[@]}"; do
+                echo "- $p"
+              done
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          {
+            echo "java_version=$java_ver"
+            echo "java_distribution=$java_dist"
+            echo "build_tool=$build_tool"
+            echo "test_cmd=$test_cmd"
+            echo "workdir=$workdir"
+            echo "retention_days=$retention_days"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup JDK
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: ${{ steps.stack.outputs.java_distribution }}
+          java-version: ${{ steps.stack.outputs.java_version }}
+          cache: ${{ steps.stack.outputs.build_tool }}
+
+      - name: Setup Gradle
+        if: steps.stack.outputs.build_tool == 'gradle'
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Run Java tests and generate JaCoCo report
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        env:
+          BUILD_TOOL: ${{ steps.stack.outputs.build_tool }}
+          CUSTOM_CMD: ${{ steps.stack.outputs.test_cmd }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CUSTOM_CMD" ]; then
+            eval "$CUSTOM_CMD"
+          elif [ "$BUILD_TOOL" = "maven" ]; then
+            if [ -x "./mvnw" ]; then
+              ./mvnw -B test jacoco:report
+            elif [ -f "./mvnw" ]; then
+              chmod +x ./mvnw
+              ./mvnw -B test jacoco:report
+            else
+              mvn -B test jacoco:report
+            fi
+          else
+            if [ -f "./gradlew" ]; then
+              chmod +x ./gradlew
+              ./gradlew test jacocoTestReport --no-daemon
+            else
+              gradle test jacocoTestReport --no-daemon
+            fi
+          fi
+
+      - name: Collect JaCoCo XML and JUnit XML reports
+        shell: bash
+        env:
+          WORKDIR: ${{ steps.stack.outputs.workdir }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/quality-test-reports"
+          mkdir -p "$out_dir"
+          i=0
+          copy_file() {
+            local src="$1"
+            i=$((i + 1))
+            local bn
+            bn="$(basename "$src")"
+            cp "$src" "$out_dir/${i}-${bn}"
+          }
+          # JaCoCo XML (Maven target/site/jacoco* e Gradle build/reports/jacoco*)
+          while IFS= read -r -d '' f; do
+            copy_file "$f"
+          done < <(find "$WORKDIR" -type f \( -path '*/jacoco*/*.xml' -o -name '*jacoco*.xml' -o -path '*/kover*/*.xml' \) -print0)
+          # JUnit XML (Maven surefire-reports e Gradle test-results)
+          while IFS= read -r -d '' f; do
+            copy_file "$f"
+          done < <(find "$WORKDIR" -type f \( -path '*/surefire-reports/TEST-*.xml' -o -path '*/failsafe-reports/TEST-*.xml' -o -path '*/test-results/*/TEST-*.xml' \) -print0)
+          ls -la "$out_dir"
+
+      - name: Upload standardized test & coverage reports
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quality-test-reports
+          path: ${{ runner.temp }}/quality-test-reports
+          if-no-files-found: ignore
+          retention-days: ${{ fromJSON(steps.stack.outputs.retention_days) }}
+
+  quality:
+    name: quality
+    needs: [test-java]
+    uses: ./.github/workflows/quality.yml
+    with:
+      scope_override: ${{ inputs.scope_override }}
+      enforcement_override: ${{ inputs.enforcement_override }}
+      test_reports_artifact: quality-test-reports
+    permissions:
+      contents: read

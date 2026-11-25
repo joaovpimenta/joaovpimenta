@@ -1,0 +1,218 @@
+# =============================================================================
+# Quality Gate — Stack ANDROID (Gradle JVM Unit Tests + Robolectric + JaCoCo/Kover)
+# =============================================================================
+# Executa testes unitários Android na JVM (+ Robolectric) em `ubuntu-latest`
+# (100% gratuito, rápido, sem precisar de emulador com KVM/macOS), gera
+# cobertura JaCoCo XML ou Kover XML + JUnit XML e encadeia o gate universal
+# `./.github/workflows/quality.yml`.
+#
+# Obs. sobre testes instrumentados (`connectedAndroidTest` em emulador):
+#   Em `ubuntu-latest` gratuito do GitHub Actions não há aceleração KVM nativa
+#   de forma consistente. Mantenha testes unitários/Robolectric obrigatórios
+#   neste gate de PR e rode instrumentados em workflow separado se necessário.
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OBRIGATÓRIAS DESTA STACK (Settings -> Actions -> Variables)
+# -----------------------------------------------------------------------------
+#   QLTY_ANDROID_JAVA_VERSION  : Versão do JDK para Gradle/AGP (ex.: '17' ou '21')
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OPCIONAIS DESTA STACK (AJUSTE CONFORME O PROJETO / FLAVOR)
+# -----------------------------------------------------------------------------
+#   QLTY_ANDROID_TEST_TASK     : Task Gradle de testes unitários (default: 'testDebugUnitTest')
+#                                Ex. com flavor: 'testDevDebugUnitTest'
+#   QLTY_ANDROID_COVERAGE_TASK : Task Gradle de relatório XML (default: 'jacocoTestReport')
+#                                Ex. Kotlin Kover: 'koverXmlReport' ou 'koverXmlReportDebug'
+#                                Ex. JaCoCo por variante: 'jacocoTestDebugUnitTestReport'
+#   QLTY_ANDROID_LINT_TASK     : Task opcional de Android Lint (ex.: 'lintDebug'; default vazio)
+#   QLTY_ANDROID_TEST_CMD      : Override completo do comando Gradle (se precisar de flags extras)
+#   QLTY_ANDROID_WORKDIR       : Diretório de trabalho em monorepos (default: '.')
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS GERAIS DO GATE (também obrigatórias no repositório)
+# -----------------------------------------------------------------------------
+#   QLTY_SCOPE               : 'pr' | 'full'                          (recomendado: 'pr')
+#   QLTY_ENFORCEMENT         : 'report-only' | 'standard' | 'strict'  (recomendado: 'standard')
+#   QLTY_VERSION             : '0.672.0'
+#   QLTY_POLICY_REF          : 'qlty-v0.3.0'
+#   QLTY_ENABLE_SMELLS       : 'true' | 'false'                       (recomendado: 'true')
+#   QLTY_ENABLE_METRICS      : 'true' | 'false'                       (recomendado: 'true')
+#   QLTY_MAX_CYCLOMATIC      : '1..100' | 'off'                       (recomendado: '10')
+#   QLTY_COVERAGE_MODE       : 'required' | 'none'                    (recomendado: 'required')
+#   QLTY_MIN_COVERAGE_TOTAL  : '0..100'                               (padrão alvo: '90')
+#   QLTY_MIN_COVERAGE_DIFF   : '0..100'                               (padrão alvo: '90')
+#   QLTY_MIN_TESTS           : inteiro >= 1                           (ex.: '1')
+#   Opc.: QLTY_ADVISORY_PLUGINS, QLTY_BLOCK_SMELLS, QLTY_ALLOW_SKIPPED_TESTS,
+#         QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY, QLTY_ARTIFACT_RETENTION_DAYS
+# =============================================================================
+name: Quality Gate — Android
+
+on:
+  workflow_call:
+    inputs:
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE (pr or full)'
+        required: false
+        default: ''
+        type: string
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT (report-only, standard, or strict)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test-android:
+    name: android-unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate Android stack environment variables
+        id: stack
+        shell: bash
+        env:
+          VAR_JAVA_VERSION: ${{ vars.QLTY_ANDROID_JAVA_VERSION }}
+          VAR_TEST_TASK: ${{ vars.QLTY_ANDROID_TEST_TASK }}
+          VAR_COV_TASK: ${{ vars.QLTY_ANDROID_COVERAGE_TASK }}
+          VAR_LINT_TASK: ${{ vars.QLTY_ANDROID_LINT_TASK }}
+          VAR_TEST_CMD: ${{ vars.QLTY_ANDROID_TEST_CMD }}
+          VAR_WORKDIR: ${{ vars.QLTY_ANDROID_WORKDIR }}
+          VAR_RETENTION_DAYS: ${{ vars.QLTY_ARTIFACT_RETENTION_DAYS }}
+        run: |
+          set -euo pipefail
+          trim() {
+            local s="$1"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          java_ver="$(trim "${VAR_JAVA_VERSION:-}")"
+          test_task="$(trim "${VAR_TEST_TASK:-testDebugUnitTest}")"
+          cov_task="$(trim "${VAR_COV_TASK:-jacocoTestReport}")"
+          lint_task="$(trim "${VAR_LINT_TASK:-}")"
+          test_cmd="$(trim "${VAR_TEST_CMD:-}")"
+          workdir="$(trim "${VAR_WORKDIR:-.}")"
+          retention_days="$(trim "${VAR_RETENTION_DAYS:-7}")"
+
+          problems=()
+          if [ -z "$java_ver" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_ANDROID_JAVA_VERSION\` (ex.: \`17\` ou \`21\`).")
+          fi
+          if [[ ! "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 1 ] || [ "$retention_days" -gt 90 ]; then
+            problems+=("Valor inválido em \`QLTY_ARTIFACT_RETENTION_DAYS\`: \`$retention_days\` (esperado: \`1..90\`).")
+          fi
+
+          if [ "${#problems[@]}" -gt 0 ]; then
+            justification="A esteira precisa ser corrigida: variáveis obrigatórias da stack Android (QLTY_ANDROID_*) estão ausentes ou inválidas."
+            echo "::error title=Esteira precisa ser corrigida::$justification"
+            for p in "${problems[@]}"; do
+              echo "::error title=Configuração Android inválida::$p"
+            done
+            {
+              echo "## Quality Gate Android — ERRO DE CONFIGURAÇÃO (A esteira precisa ser corrigida)"
+              echo ""
+              echo "$justification"
+              echo ""
+              for p in "${problems[@]}"; do
+                echo "- $p"
+              done
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          {
+            echo "java_version=$java_ver"
+            echo "test_task=$test_task"
+            echo "coverage_task=$cov_task"
+            echo "lint_task=$lint_task"
+            echo "test_cmd=$test_cmd"
+            echo "workdir=$workdir"
+            echo "retention_days=$retention_days"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup JDK
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: ${{ steps.stack.outputs.java_version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Run Android JVM unit tests and coverage report
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        env:
+          CUSTOM_CMD: ${{ steps.stack.outputs.test_cmd }}
+          TEST_TASK: ${{ steps.stack.outputs.test_task }}
+          COV_TASK: ${{ steps.stack.outputs.coverage_task }}
+          LINT_TASK: ${{ steps.stack.outputs.lint_task }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CUSTOM_CMD" ]; then
+            eval "$CUSTOM_CMD"
+          else
+            chmod +x ./gradlew
+            tasks=("$TEST_TASK")
+            if [ -n "$COV_TASK" ]; then
+              tasks+=("$COV_TASK")
+            fi
+            if [ -n "$LINT_TASK" ]; then
+              tasks+=("$LINT_TASK")
+            fi
+            ./gradlew "${tasks[@]}" --no-daemon --stacktrace
+          fi
+
+      - name: Collect JaCoCo/Kover XML and JUnit XML reports
+        shell: bash
+        env:
+          WORKDIR: ${{ steps.stack.outputs.workdir }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/quality-test-reports"
+          mkdir -p "$out_dir"
+          i=0
+          copy_file() {
+            local src="$1"
+            i=$((i + 1))
+            local bn
+            bn="$(basename "$src")"
+            cp "$src" "$out_dir/${i}-${bn}"
+          }
+          # JaCoCo XML e Kover XML (ambos seguem schema JaCoCo compatível)
+          while IFS= read -r -d '' f; do
+            copy_file "$f"
+          done < <(find "$WORKDIR" -type f \( -path '*/jacoco*/*.xml' -o -name '*jacoco*.xml' -o -path '*/kover*/*.xml' -o -name '*kover*.xml' \) -print0)
+          # JUnit XML (Gradle Android unit test results)
+          while IFS= read -r -d '' f; do
+            copy_file "$f"
+          done < <(find "$WORKDIR" -type f -path '*/test-results/*/TEST-*.xml' -print0)
+          ls -la "$out_dir"
+
+      - name: Upload standardized test & coverage reports
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quality-test-reports
+          path: ${{ runner.temp }}/quality-test-reports
+          if-no-files-found: ignore
+          retention-days: ${{ fromJSON(steps.stack.outputs.retention_days) }}
+
+  quality:
+    name: quality
+    needs: [test-android]
+    uses: ./.github/workflows/quality.yml
+    with:
+      scope_override: ${{ inputs.scope_override }}
+      enforcement_override: ${{ inputs.enforcement_override }}
+      test_reports_artifact: quality-test-reports
+    permissions:
+      contents: read

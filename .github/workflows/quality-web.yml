@@ -1,0 +1,271 @@
+# =============================================================================
+# Quality Gate — Stack WEB / Node.js / TypeScript / JavaScript
+# =============================================================================
+# Executa testes nativos (Vitest / Jest / node:test / Playwright opcional),
+# coleta cobertura (LCOV ou Cobertura XML) + JUnit XML e encadeia o gate
+# universal `./.github/workflows/quality.yml` (Qlty + cobertura geral + código
+# novo + quantidade de testes + ciclomática + smells + segredos).
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OBRIGATÓRIAS DESTA STACK (Settings -> Actions -> Variables)
+# -----------------------------------------------------------------------------
+#   QLTY_WEB_NODE_VERSION    : Versão do Node.js (ex.: '22' ou '22.13.0')
+#   QLTY_WEB_PACKAGE_MANAGER : 'pnpm' | 'npm' | 'yarn' | 'none'
+#   QLTY_WEB_TEST_CMD        : Comando que executa testes e gera cobertura + JUnit XML
+#                              Exemplos:
+#                                Vitest:    'pnpm exec vitest run --coverage --reporter=default --reporter=junit --outputFile.junit=coverage/junit.xml'
+#                                Jest:      'npx jest --ci --coverage --coverageReporters=lcov --reporters=default --reporters=jest-junit'
+#                                node:test: 'node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info --test-reporter=junit --test-reporter-destination=coverage/junit.xml'
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS OPCIONAIS DESTA STACK (AJUSTE CONFORME O PROJETO)
+# -----------------------------------------------------------------------------
+#   QLTY_WEB_PNPM_VERSION    : Versão do pnpm (ex.: '11.19.0'; vazio lê packageManager do package.json)
+#   QLTY_WEB_INSTALL_CMD     : Override do comando de instalação
+#                              Defaults: pnpm='pnpm install --frozen-lockfile', npm='npm ci', yarn='yarn install --frozen-lockfile'
+#   QLTY_WEB_LINT_CMD        : Comando de lint nativo opcional (ex.: 'pnpm lint')
+#   QLTY_WEB_TYPECHECK_CMD   : Comando de typecheck opcional (ex.: 'pnpm typecheck')
+#   QLTY_WEB_BUILD_CMD       : Comando de build opcional (ex.: 'pnpm build')
+#   QLTY_WEB_E2E_CMD         : Comando de testes E2E/web opcional (ex.: 'pnpm test:smoke')
+#   QLTY_WEB_COVERAGE_DIR    : Pasta onde cobertura/JUnit são gerados (default: 'coverage')
+#   QLTY_WEB_WORKDIR         : Diretório de trabalho em monorepos (default: '.')
+#
+# -----------------------------------------------------------------------------
+# VARIÁVEIS GERAIS DO GATE (também obrigatórias no repositório)
+# -----------------------------------------------------------------------------
+#   QLTY_SCOPE               : 'pr' | 'full'                          (recomendado: 'pr')
+#   QLTY_ENFORCEMENT         : 'report-only' | 'standard' | 'strict'  (recomendado: 'standard')
+#   QLTY_VERSION             : '0.672.0'
+#   QLTY_POLICY_REF          : 'qlty-v0.3.0'
+#   QLTY_ENABLE_SMELLS       : 'true' | 'false'                       (recomendado: 'true')
+#   QLTY_ENABLE_METRICS      : 'true' | 'false'                       (recomendado: 'true')
+#   QLTY_MAX_CYCLOMATIC      : '1..100' | 'off'                       (recomendado: '10')
+#   QLTY_COVERAGE_MODE       : 'required' | 'none'                    (recomendado: 'required')
+#   QLTY_MIN_COVERAGE_TOTAL  : '0..100'                               (padrão alvo: '90')
+#   QLTY_MIN_COVERAGE_DIFF   : '0..100'                               (padrão alvo: '90')
+#   QLTY_MIN_TESTS           : inteiro >= 1                           (ex.: '1')
+#   Opc.: QLTY_ADVISORY_PLUGINS, QLTY_BLOCK_SMELLS, QLTY_ALLOW_SKIPPED_TESTS,
+#         QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY, QLTY_ARTIFACT_RETENTION_DAYS
+# =============================================================================
+name: Quality Gate — Web / Node
+
+on:
+  workflow_call:
+    inputs:
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE (pr or full)'
+        required: false
+        default: ''
+        type: string
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT (report-only, standard, or strict)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test-web:
+    name: web-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate Web stack environment variables
+        id: stack
+        shell: bash
+        env:
+          VAR_NODE_VERSION: ${{ vars.QLTY_WEB_NODE_VERSION }}
+          VAR_PKG_MANAGER: ${{ vars.QLTY_WEB_PACKAGE_MANAGER }}
+          VAR_PNPM_VERSION: ${{ vars.QLTY_WEB_PNPM_VERSION }}
+          VAR_INSTALL_CMD: ${{ vars.QLTY_WEB_INSTALL_CMD }}
+          VAR_TEST_CMD: ${{ vars.QLTY_WEB_TEST_CMD }}
+          VAR_LINT_CMD: ${{ vars.QLTY_WEB_LINT_CMD }}
+          VAR_TYPECHECK_CMD: ${{ vars.QLTY_WEB_TYPECHECK_CMD }}
+          VAR_BUILD_CMD: ${{ vars.QLTY_WEB_BUILD_CMD }}
+          VAR_E2E_CMD: ${{ vars.QLTY_WEB_E2E_CMD }}
+          VAR_COVERAGE_DIR: ${{ vars.QLTY_WEB_COVERAGE_DIR }}
+          VAR_WORKDIR: ${{ vars.QLTY_WEB_WORKDIR }}
+          VAR_COVERAGE_MODE: ${{ vars.QLTY_COVERAGE_MODE }}
+          VAR_RETENTION_DAYS: ${{ vars.QLTY_ARTIFACT_RETENTION_DAYS }}
+        run: |
+          set -euo pipefail
+          trim() {
+            local s="$1"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          node_ver="$(trim "${VAR_NODE_VERSION:-}")"
+          pkg_mgr="$(trim "${VAR_PKG_MANAGER:-}")"
+          pnpm_ver="$(trim "${VAR_PNPM_VERSION:-}")"
+          install_cmd="$(trim "${VAR_INSTALL_CMD:-}")"
+          test_cmd="$(trim "${VAR_TEST_CMD:-}")"
+          lint_cmd="$(trim "${VAR_LINT_CMD:-}")"
+          typecheck_cmd="$(trim "${VAR_TYPECHECK_CMD:-}")"
+          build_cmd="$(trim "${VAR_BUILD_CMD:-}")"
+          e2e_cmd="$(trim "${VAR_E2E_CMD:-}")"
+          coverage_dir="$(trim "${VAR_COVERAGE_DIR:-coverage}")"
+          workdir="$(trim "${VAR_WORKDIR:-.}")"
+          coverage_mode="$(trim "${VAR_COVERAGE_MODE:-}")"
+          retention_days="$(trim "${VAR_RETENTION_DAYS:-7}")"
+
+          problems=()
+          if [ -z "$node_ver" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_WEB_NODE_VERSION\` (ex.: \`22\` ou \`22.13.0\`).")
+          fi
+          if [ -z "$pkg_mgr" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_WEB_PACKAGE_MANAGER\` (esperado: \`pnpm\`, \`npm\`, \`yarn\` ou \`none\`).")
+          elif [[ "$pkg_mgr" != "pnpm" && "$pkg_mgr" != "npm" && "$pkg_mgr" != "yarn" && "$pkg_mgr" != "none" ]]; then
+            problems+=("Valor inválido em \`QLTY_WEB_PACKAGE_MANAGER\`: \`$pkg_mgr\` (esperado: \`pnpm\`, \`npm\`, \`yarn\` ou \`none\`).")
+          fi
+          if [ -z "$test_cmd" ] && [ "$coverage_mode" != "none" ]; then
+            problems+=("Variável obrigatória ausente: \`QLTY_WEB_TEST_CMD\` (comando que gera cobertura LCOV/Cobertura + JUnit XML).")
+          fi
+          if [[ ! "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 1 ] || [ "$retention_days" -gt 90 ]; then
+            problems+=("Valor inválido em \`QLTY_ARTIFACT_RETENTION_DAYS\`: \`$retention_days\` (esperado: \`1..90\`).")
+          fi
+
+          if [ "${#problems[@]}" -gt 0 ]; then
+            justification="A esteira precisa ser corrigida: variáveis obrigatórias da stack Web (QLTY_WEB_*) estão ausentes ou inválidas."
+            echo "::error title=Esteira precisa ser corrigida::$justification"
+            for p in "${problems[@]}"; do
+              echo "::error title=Configuração Web inválida::$p"
+            done
+            {
+              echo "## Quality Gate Web — ERRO DE CONFIGURAÇÃO (A esteira precisa ser corrigida)"
+              echo ""
+              echo "$justification"
+              echo ""
+              for p in "${problems[@]}"; do
+                echo "- $p"
+              done
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if [ -z "$install_cmd" ]; then
+            case "$pkg_mgr" in
+              pnpm) install_cmd="pnpm install --frozen-lockfile" ;;
+              npm)  install_cmd="npm ci" ;;
+              yarn) install_cmd="yarn install --frozen-lockfile" ;;
+              none) install_cmd="" ;;
+            esac
+          fi
+
+          {
+            echo "node_version=$node_ver"
+            echo "package_manager=$pkg_mgr"
+            echo "pnpm_version=$pnpm_ver"
+            echo "install_cmd=$install_cmd"
+            echo "test_cmd=$test_cmd"
+            echo "lint_cmd=$lint_cmd"
+            echo "typecheck_cmd=$typecheck_cmd"
+            echo "build_cmd=$build_cmd"
+            echo "e2e_cmd=$e2e_cmd"
+            echo "coverage_dir=$coverage_dir"
+            echo "workdir=$workdir"
+            echo "retention_days=$retention_days"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        if: steps.stack.outputs.package_manager == 'pnpm'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: ${{ steps.stack.outputs.pnpm_version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.stack.outputs.node_version }}
+          cache: ${{ steps.stack.outputs.package_manager != 'none' && steps.stack.outputs.package_manager || '' }}
+
+      - name: Install dependencies
+        if: steps.stack.outputs.install_cmd != ''
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        run: ${{ steps.stack.outputs.install_cmd }}
+
+      - name: Run native lint
+        if: steps.stack.outputs.lint_cmd != ''
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        run: ${{ steps.stack.outputs.lint_cmd }}
+
+      - name: Run native typecheck
+        if: steps.stack.outputs.typecheck_cmd != ''
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        run: ${{ steps.stack.outputs.typecheck_cmd }}
+
+      - name: Run Web tests with coverage and JUnit report
+        if: steps.stack.outputs.test_cmd != ''
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        run: ${{ steps.stack.outputs.test_cmd }}
+
+      - name: Run optional build
+        if: steps.stack.outputs.build_cmd != ''
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        run: ${{ steps.stack.outputs.build_cmd }}
+
+      - name: Run optional E2E tests
+        if: steps.stack.outputs.e2e_cmd != ''
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        shell: bash
+        run: ${{ steps.stack.outputs.e2e_cmd }}
+
+      - name: Collect coverage and JUnit reports
+        shell: bash
+        env:
+          WORKDIR: ${{ steps.stack.outputs.workdir }}
+          COV_DIR: ${{ steps.stack.outputs.coverage_dir }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/quality-test-reports"
+          mkdir -p "$out_dir"
+          base_dir="$WORKDIR"
+          i=0
+          copy_file() {
+            local src="$1"
+            i=$((i + 1))
+            local bn
+            bn="$(basename "$src")"
+            cp "$src" "$out_dir/${i}-${bn}"
+          }
+          if [ -d "$base_dir/$COV_DIR" ]; then
+            while IFS= read -r -d '' f; do
+              copy_file "$f"
+            done < <(find "$base_dir/$COV_DIR" -type f \( -name '*.info' -o -name '*.lcov' -o -name '*.xml' \) -print0)
+          fi
+          while IFS= read -r -d '' f; do
+            copy_file "$f"
+          done < <(find "$base_dir" -maxdepth 3 -type f \( -name 'lcov.info' -o -name '*junit*.xml' -o -name 'cobertura*.xml' \) -not -path '*/node_modules/*' -not -path "$base_dir/$COV_DIR/*" -print0)
+          ls -la "$out_dir"
+
+      - name: Upload standardized test & coverage reports
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quality-test-reports
+          path: ${{ runner.temp }}/quality-test-reports
+          if-no-files-found: ignore
+          retention-days: ${{ fromJSON(steps.stack.outputs.retention_days) }}
+
+  quality:
+    name: quality
+    needs: [test-web]
+    uses: ./.github/workflows/quality.yml
+    with:
+      scope_override: ${{ inputs.scope_override }}
+      enforcement_override: ${{ inputs.enforcement_override }}
+      test_reports_artifact: quality-test-reports
+    permissions:
+      contents: read

@@ -4,7 +4,7 @@
 #   [[source]]
 #   name = "personal-quality-policy"
 #   repository = "https://github.com/joaovpimenta/joaovpimenta.git"
-#   tag = "qlty-v0.2.0"
+#   tag = "qlty-v0.3.0"
 #
 # Local .qlty/qlty.toml settings take precedence over this shared source.
 

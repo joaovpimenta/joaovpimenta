@@ -1,0 +1,87 @@
+# =============================================================================
+# Template Caller — Stack WEB / Node.js / TypeScript / JavaScript
+# =============================================================================
+# Copie para `.github/workflows/quality.yml` no repositório alvo.
+#
+# -----------------------------------------------------------------------------
+# 1) VARIÁVEIS DA STACK WEB (Settings -> Actions -> Variables)
+# -----------------------------------------------------------------------------
+# Obrigatórias:
+#   gh variable set QLTY_WEB_NODE_VERSION    --body "22"        # Ex.: 22 | 22.13.0 | 20
+#   gh variable set QLTY_WEB_PACKAGE_MANAGER --body "pnpm"      # Opções: pnpm | npm | yarn | none
+#   gh variable set QLTY_WEB_TEST_CMD        --body "pnpm exec vitest run --coverage --reporter=default --reporter=junit --outputFile.junit=coverage/junit.xml"
+#     # Outras opções para QLTY_WEB_TEST_CMD:
+#     #   Jest:      "npx jest --ci --coverage --coverageReporters=lcov --reporters=default --reporters=jest-junit"
+#     #   node:test: "node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info --test-reporter=junit --test-reporter-destination=coverage/junit.xml"
+#
+# Opcionais (ajuste conforme o projeto):
+#   gh variable set QLTY_WEB_PNPM_VERSION    --body "11.19.0"   # Vazio lê packageManager do package.json
+#   gh variable set QLTY_WEB_INSTALL_CMD     --body ""          # Override (default: pnpm install --frozen-lockfile / npm ci)
+#   gh variable set QLTY_WEB_LINT_CMD        --body "pnpm lint" # Lint nativo (ESLint/Biome)
+#   gh variable set QLTY_WEB_TYPECHECK_CMD   --body "pnpm typecheck"
+#   gh variable set QLTY_WEB_BUILD_CMD       --body "pnpm build"
+#   gh variable set QLTY_WEB_E2E_CMD         --body ""          # Ex.: "pnpm test:smoke"
+#   gh variable set QLTY_WEB_COVERAGE_DIR    --body "coverage"  # Default: coverage
+#   gh variable set QLTY_WEB_WORKDIR         --body "."         # Default: . (para monorepos)
+#
+# -----------------------------------------------------------------------------
+# 2) VARIÁVEIS GERAIS DO GATE (ajuste cobertura / ciclomática por repo!)
+# -----------------------------------------------------------------------------
+#   gh variable set QLTY_SCOPE               --body "pr"          # Opções: pr | full
+#   gh variable set QLTY_ENFORCEMENT         --body "standard"    # Opções: report-only | standard | strict
+#   gh variable set QLTY_VERSION             --body "0.672.0"     # SemVer do Qlty CLI sem 'v'
+#   gh variable set QLTY_POLICY_REF          --body "qlty-v0.3.0" # Tag ou SHA em joaovpimenta/joaovpimenta
+#   gh variable set QLTY_ENABLE_SMELLS       --body "true"        # Opções: true | false
+#   gh variable set QLTY_ENABLE_METRICS      --body "true"        # Opções: true | false
+#   gh variable set QLTY_MAX_CYCLOMATIC      --body "10"          # Opções: 1..100 (ex.: 10, 15) | off
+#   gh variable set QLTY_COVERAGE_MODE       --body "required"    # Opções: required | none
+#   gh variable set QLTY_MIN_COVERAGE_TOTAL  --body "90"          # Opções: 0..100 (%) — ajuste p/ legado se precisar
+#   gh variable set QLTY_MIN_COVERAGE_DIFF   --body "90"          # Opções: 0..100 (%) — código novo no PR
+#   gh variable set QLTY_MIN_TESTS           --body "1"           # Opções: inteiro >= 1
+#
+# Opcionais do gate:
+#   gh variable set QLTY_ADVISORY_PLUGINS            --body "osv-scanner"
+#   gh variable set QLTY_BLOCK_SMELLS                --body "false" # true = bloqueia smells/duplicação em standard
+#   gh variable set QLTY_ALLOW_SKIPPED_TESTS         --body "true"  # false = bloqueia testes skipped
+#   gh variable set QLTY_COVERAGE_DIFF_FAIL_ON_EMPTY --body "false" # true = falha PR sem linhas executáveis
+#   gh variable set QLTY_ARTIFACT_RETENTION_DAYS     --body "7"     # 1..90
+# =============================================================================
+name: Quality (Web)
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      scope_override:
+        description: 'Optional manual override for QLTY_SCOPE'
+        required: false
+        default: 'project-default'
+        type: choice
+        options:
+          - project-default
+          - pr
+          - full
+      enforcement_override:
+        description: 'Optional manual override for QLTY_ENFORCEMENT'
+        required: false
+        default: 'project-default'
+        type: choice
+        options:
+          - project-default
+          - report-only
+          - standard
+          - strict
+
+concurrency:
+  group: quality-web-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality-web:
+    uses: joaovpimenta/joaovpimenta/.github/workflows/quality-web.yml@qlty-v0.3.0
+    with:
+      scope_override: ${{ github.event_name == 'workflow_dispatch' && inputs.scope_override != 'project-default' && inputs.scope_override || '' }}
+      enforcement_override: ${{ github.event_name == 'workflow_dispatch' && inputs.enforcement_override != 'project-default' && inputs.enforcement_override || '' }}
