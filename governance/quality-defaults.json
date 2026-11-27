@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "platform": {
+    "QLTY_VERSION": "0.672.0",
+    "QLTY_POLICY_REF": "qlty-v0.3.0"
+  },
+  "policy": {
+    "QLTY_SCOPE": "pr",
+    "QLTY_ENFORCEMENT": "standard",
+    "QLTY_ENABLE_SMELLS": "true",
+    "QLTY_ENABLE_METRICS": "true",
+    "QLTY_MAX_CYCLOMATIC": "10",
+    "QLTY_COVERAGE_MODE": "required",
+    "QLTY_MIN_COVERAGE_TOTAL": "90",
+    "QLTY_MIN_COVERAGE_DIFF": "90",
+    "QLTY_MIN_TESTS": "1"
+  },
+  "stacks": {
+    "web": {
+      "QLTY_WEB_NODE_VERSION": "22",
+      "QLTY_WEB_PACKAGE_MANAGER": "npm"
+    },
+    "java": {
+      "QLTY_JAVA_VERSION": "21",
+      "QLTY_JAVA_BUILD_TOOL": "maven"
+    },
+    "android": {
+      "QLTY_ANDROID_JAVA_VERSION": "17"
+    },
+    "python": {
+      "QLTY_PYTHON_VERSION": "3.12"
+    },
+    "shell-static": {
+      "QLTY_ENABLE_SMELLS": "false",
+      "QLTY_ENABLE_METRICS": "false",
+      "QLTY_MAX_CYCLOMATIC": "off",
+      "QLTY_COVERAGE_MODE": "none"
+    }
+  }
+}

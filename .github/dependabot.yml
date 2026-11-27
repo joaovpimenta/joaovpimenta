@@ -1,0 +1,17 @@
+# managed-by: development-hq-governance
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 1
+    labels:
+      - "type:tech-debt"
+      - "area:infra"
+    groups:
+      github-actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

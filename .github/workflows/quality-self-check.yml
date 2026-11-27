@@ -5,17 +5,15 @@ on:
     branches: [main]
     paths:
       - 'source.toml'
-      - 'scripts/quality-gate*.mjs'
-      - '.github/workflows/quality*.yml'
-      - 'governance/defaults/quality-caller.yml'
-      - 'governance/defaults/quality-callers/*.yml'
+      - 'scripts/*.mjs'
+      - '.github/workflows/*.yml'
+      - 'governance/**'
   pull_request:
     paths:
       - 'source.toml'
-      - 'scripts/quality-gate*.mjs'
-      - '.github/workflows/quality*.yml'
-      - 'governance/defaults/quality-caller.yml'
-      - 'governance/defaults/quality-callers/*.yml'
+      - 'scripts/*.mjs'
+      - '.github/workflows/*.yml'
+      - 'governance/**'
   workflow_dispatch:
 
 permissions:
@@ -35,11 +33,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run quality gate unit tests
+      - name: Run quality gate and governance unit tests
         shell: bash
         run: |
           set -euo pipefail
-          node --test scripts/quality-gate.test.mjs
+          node --test scripts/quality-gate.test.mjs scripts/governance-policy.test.mjs
+
+      - name: Validate governance JSON schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "JSON.parse(require('node:fs').readFileSync('governance/taxonomy.json','utf8')); JSON.parse(require('node:fs').readFileSync('governance/quality-defaults.json','utf8'));"
 
       - name: Install and verify pinned Qlty CLI
         shell: bash
