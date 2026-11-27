@@ -56,17 +56,15 @@ jobs:
       INCLUDE_ISSUES: ${{ vars.DEVELOPMENT_HQ_INCLUDE_ISSUES || 'true' }}
       INCLUDE_PRS: ${{ vars.DEVELOPMENT_HQ_INCLUDE_PRS || 'true' }}
       LOG_LEVEL: ${{ vars.DEVELOPMENT_HQ_LOG_LEVEL || 'info' }}
-      # -----------------------------------------------------------------------
-      # Controles opcionais de governança (ajuste via Actions Variables do repo)
-      #   DEVELOPMENT_HQ_IGNORE_FORKS     : 'true' (default) | 'false'
-      #   DEVELOPMENT_HQ_WRITE_MODE       : 'pr' (default — 1 PR atômico) | 'direct'
-      #   DEVELOPMENT_HQ_AUTO_MERGE       : 'safe-only' (default — só owner + não-sensível) | 'off' | 'all'
-      #   DEVELOPMENT_HQ_SYNC_VARIABLES   : 'true' (default) | 'false'
-      #   DEVELOPMENT_HQ_SYNC_SETTINGS    : 'true' (default) | 'false'
-      #   DEVELOPMENT_HQ_SYNC_RULESETS    : 'true' (default) | 'false'
-      #   DEVELOPMENT_HQ_SYNC_DEPENDABOT  : 'true' (default) | 'false'
-      #   DEVELOPMENT_HQ_SYNC_AGENTS      : 'true' (default) | 'false'
-      # -----------------------------------------------------------------------
+      # Optional governance controls (configure via repository Actions Variables):
+      #   DEVELOPMENT_HQ_IGNORE_FORKS    : 'true' (default) | 'false'
+      #   DEVELOPMENT_HQ_WRITE_MODE      : 'pr' (default, 1 atomic PR) | 'direct'
+      #   DEVELOPMENT_HQ_AUTO_MERGE      : 'safe-only' (default, owner + non-sensitive only) | 'off' | 'all'
+      #   DEVELOPMENT_HQ_SYNC_VARIABLES  : 'true' (default) | 'false'
+      #   DEVELOPMENT_HQ_SYNC_SETTINGS   : 'true' (default) | 'false'
+      #   DEVELOPMENT_HQ_SYNC_RULESETS   : 'true' (default) | 'false'
+      #   DEVELOPMENT_HQ_SYNC_DEPENDABOT : 'true' (default) | 'false'
+      #   DEVELOPMENT_HQ_SYNC_AGENTS     : 'true' (default) | 'false'
       GOVERNANCE_IGNORE_FORKS: ${{ vars.DEVELOPMENT_HQ_IGNORE_FORKS || 'true' }}
       GOVERNANCE_WRITE_MODE: ${{ vars.DEVELOPMENT_HQ_WRITE_MODE || 'pr' }}
       GOVERNANCE_AUTO_MERGE: ${{ vars.DEVELOPMENT_HQ_AUTO_MERGE || 'safe-only' }}
