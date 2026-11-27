@@ -227,22 +227,22 @@ async function collectManagedFileChanges(repo, context) {
   const managedFiles = [
     {
       path: '.github/workflows/governance.yml',
-      content: fs.readFileSync('governance/defaults/governance-caller.yml', 'utf8'),
+      content: readUtf8Lf('governance/defaults/governance-caller.yml'),
       marker: MANAGED_YAML_MARKER,
     },
     {
       path: '.github/ISSUE_TEMPLATE/work-item.yml',
-      content: fs.readFileSync('governance/defaults/ISSUE_TEMPLATE/work-item.yml', 'utf8'),
+      content: readUtf8Lf('governance/defaults/ISSUE_TEMPLATE/work-item.yml'),
       marker: MANAGED_YAML_MARKER,
     },
     {
       path: '.github/ISSUE_TEMPLATE/config.yml',
-      content: fs.readFileSync('governance/defaults/ISSUE_TEMPLATE/config.yml', 'utf8'),
+      content: readUtf8Lf('governance/defaults/ISSUE_TEMPLATE/config.yml'),
       marker: MANAGED_YAML_MARKER,
     },
     {
       path: '.github/PULL_REQUEST_TEMPLATE.md',
-      content: fs.readFileSync('governance/defaults/PULL_REQUEST_TEMPLATE.md', 'utf8'),
+      content: readUtf8Lf('governance/defaults/PULL_REQUEST_TEMPLATE.md'),
       marker: MANAGED_HTML_MARKER,
     },
   ];
@@ -250,13 +250,13 @@ async function collectManagedFileChanges(repo, context) {
   if (syncDependabot) {
     managedFiles.push({
       path: '.github/dependabot.yml',
-      content: buildDependabotConfig(context.stackInfo),
+      content: normalizeLf(buildDependabotConfig(context.stackInfo)),
       marker: MANAGED_YAML_MARKER,
     });
     if (!isController) {
       managedFiles.push({
         path: '.github/workflows/dependabot-auto-merge.yml',
-        content: fs.readFileSync('governance/defaults/dependabot-auto-merge-caller.yml', 'utf8'),
+        content: readUtf8Lf('governance/defaults/dependabot-auto-merge-caller.yml'),
         marker: MANAGED_YAML_MARKER,
       });
     }
@@ -270,7 +270,7 @@ async function collectManagedFileChanges(repo, context) {
       pending.push({ path: spec.path, content: spec.content });
       continue;
     }
-    const current = decodeContent(existing);
+    const current = normalizeLf(decodeContent(existing));
     if (current === spec.content) continue;
     if (!current.startsWith(spec.marker)) {
       counters.fileConflicts++;
@@ -280,12 +280,12 @@ async function collectManagedFileChanges(repo, context) {
   }
 
   if (syncAgents) {
-    const agentsTemplate = fs.readFileSync('governance/defaults/AGENTS.md', 'utf8');
+    const agentsTemplate = readUtf8Lf('governance/defaults/AGENTS.md');
     const existingAgents = await getContent(repo.full_name, 'AGENTS.md');
-    const existingText = existingAgents ? decodeContent(existingAgents) : null;
+    const existingText = existingAgents ? normalizeLf(decodeContent(existingAgents)) : null;
     const result = reconcileAgentsMd(existingText, agentsTemplate);
     if (result.action === 'create' || result.action === 'update') {
-      pending.push({ path: 'AGENTS.md', content: result.content });
+      pending.push({ path: 'AGENTS.md', content: normalizeLf(result.content) });
     } else if (result.action === 'conflict') {
       counters.fileConflicts++;
     }
@@ -753,9 +753,9 @@ async function syncOwnerDefaults(owner) {
 
   let changed = false;
   for (const [target, source] of files) {
-    const desired = fs.readFileSync(source, 'utf8');
+    const desired = readUtf8Lf(source);
     const existing = await getContent(repoName, target);
-    if (existing && decodeContent(existing) === desired) continue;
+    if (existing && normalizeLf(decodeContent(existing)) === desired) continue;
 
     changed = true;
     if (!dryRun) {
@@ -1044,6 +1044,12 @@ function sameSet(a, b) {
   const x = new Set(a);
   const y = new Set(b);
   return x.size === y.size && [...x].every((v) => y.has(v));
+}
+function normalizeLf(text) {
+  return String(text ?? '').replace(/\r\n/g, '\n');
+}
+function readUtf8Lf(filePath) {
+  return normalizeLf(fs.readFileSync(filePath, 'utf8'));
 }
 function eq(a, b) {
   return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
