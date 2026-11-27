@@ -36,7 +36,7 @@ on:
         type: boolean
 
 concurrency:
-  group: development-hq-sync
+  group: development-hq-sync-v2
   cancel-in-progress: false
 
 permissions:
